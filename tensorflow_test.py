@@ -8,6 +8,9 @@ from sklearn.utils import shuffle
 from sklearn.metrics import confusion_matrix
 import copy
 import matplotlib.pyplot as plt
+from collections import namedtuple
+
+from deep_model import LayerParam, set_layer_param_init_values, build_deep_model
 
 def batchify(Xs, ys, batches):
     Xs, ys = shuffle(Xs, ys, random_state=0)
@@ -18,112 +21,126 @@ def batchify(Xs, ys, batches):
 def mnist_dataset():
     raw_data = tf.keras.datasets.mnist.load_data(path='mnist.npz')
     train_X, train_y_raw = raw_data[0]
-    test_X, test_y_raw = raw_data[1]
+    val_X, val_y_raw = raw_data[1]
 
     train_X = train_X.reshape((len(train_X), 784))
-    test_X = test_X.reshape((len(test_X), 784))
+    val_X = val_X.reshape((len(val_X), 784))
 
     # normalizing x values in [0, 1]
     train_X = train_X/255.0
-    test_X = test_X/255.0
+    val_X = val_X/255.0
 
     # 1 hot encoding y values
     train_y = np.zeros((len(train_y_raw), 10))
     train_y[np.arange(len(train_y_raw)), train_y_raw] = 1
-    test_y = np.zeros((len(test_y_raw), 10))
-    test_y[np.arange(len(test_y_raw)), test_y_raw] = 1
+    val_y = np.zeros((len(val_y_raw), 10))
+    val_y[np.arange(len(val_y_raw)), val_y_raw] = 1
 
-    return (train_X, train_y), (test_X, test_y)
+    return (train_X, train_y), (val_X, val_y)
 
+# def update_blacklist(layer_params, old_blacklist):
 
-def build_deep_model(num_inputs, layer_parameters, num_outputs):
-    x = tf.placeholder(tf.float32, [None, num_inputs])
-    y_true = tf.placeholder(tf.float32, [None, num_outputs])
-
-    def sigmoid_layer(X, prev_layer_size, layer_size):
-        with tf.name_scope('relu_node'):
-            # random normal and 0 distributed variables
-            # W = tf.Variable(tf.random_normal([prev_layer_size, layer_size]))
-            # b = tf.Variable(tf.zeros([layer_size]))
-
-            # xavier initialized variables
-            W = tf.get_variable("W", shape=[prev_layer_size, layer_size], initializer=tf.contrib.layers.xavier_initializer())
-            b = tf.get_variable("b", shape=[layer_size], initializer=tf.contrib.layers.xavier_initializer())
-            return tf.nn.relu(tf.matmul(X, W) + b)
-
-    def tanh_layer(X, prev_layer_size, num_outputs):
-        with tf.name_scope('softmax_node'):
-            # random normal and 0 distributed variables
-            # W = tf.Variable(tf.random_normal([prev_layer_size, num_outputs]))
-            # b = tf.Variable(tf.zeros([num_outputs]))
-
-            # xavier initialized variables
-            W = tf.get_variable("W2", shape=[prev_layer_size, num_outputs], initializer=tf.contrib.layers.xavier_initializer())
-            b = tf.get_variable("b2", shape=[num_outputs], initializer=tf.contrib.layers.xavier_initializer())
-            return tf.nn.softmax(tf.matmul(X, W) + b)
-
-    prev_layer_size = num_inputs
-    prev_layer_output = x
-    for layer_desc in layer_parameters:
-        layer_type, params = layer_desc
-        if layer_type == "dropout":
-            rate = params
-            prev_layer_output = tf.layers.dropout(prev_layer_output, rate)
-        elif layer_type == "dense":
-            layer_size = params
-            prev_layer_output = sigmoid_layer(prev_layer_output, prev_layer_size, layer_size)
-            prev_layer_size = layer_size
-
-    return x, tanh_layer(prev_layer_output, prev_layer_size, num_outputs), y_true
+WeightIndex = namedtuple("WeightIndex", ["weight", "layer", "wb", "index"])
 
 
+def get_layer_weights(sess, dnn_variables):
+    def get_weights(i_l, i_wb, i_cur, weights):
+        if len(weights.shape) > 1:
+            weight_indices = []
+            for i, weight in enumerate(weights):
+                c_weights = get_weights(i_l, i_wb, i_cur+(i,), weight)
+                weight_indices.extend(c_weights)
+            return weight_indices
+        elif len(weights.shape) == 1:
+            return [WeightIndex(weight, i_l, i_wb, i_cur+(i,)) for i, weight in enumerate(weights)]
+        else:
+            raise Exception("unexpected weights value %s" % weighs)
 
+    variables = []
+    for i_l, layer in enumerate(dnn_variables):
+        for i_wb, weight_variables in enumerate(layer):
+            weight_values = sess.run(weight_variables)
+            variables.extend(get_weights(i_l, i_wb, tuple(), weight_values))
 
-(train_X, train_y), (test_X, test_y) = mnist_dataset()
+    return variables
 
-x, y, y_true = build_deep_model(784, [("dense", 512), ("dropout", .2)], 10)
+def experiment(layer_params):
+    (train_X, train_y), (val_X, val_y) = mnist_dataset()
 
-# squared difference
-# loss = tf.reduce_mean(tf.square(y_true-y))
+    x, y, y_true, dnn_variables = build_deep_model(layer_params)
 
-# categorical crossentropy
-loss = tf.reduce_mean(tf.losses.softmax_cross_entropy(y_true, y))
+    loss = tf.reduce_mean(tf.losses.softmax_cross_entropy(y_true, y))
+    train_step = tf.train.AdamOptimizer(learning_rate=.01).minimize(loss)
+    init = tf.global_variables_initializer()
 
-tf.summary.histogram("loss", loss)
+    # tpu_address = 'grpc://' + os.environ['COLAB_TPU_ADDR']
+    # with tf.Session(tpu_address) as sess:
+    with tf.Session() as sess:
+        acc_over_time = []
 
-train_step = tf.train.AdamOptimizer(learning_rate=.01).minimize(loss)
+        sess.run(init)
+        layer_weights = get_layer_weights(sess, dnn_variables)
 
-init = tf.global_variables_initializer()
+        batches = 8
+        batch_size = int(len(train_X)/batches)
 
-# tpu_address = 'grpc://' + os.environ['COLAB_TPU_ADDR']
-# with tf.Session(tpu_address) as sess:
-with tf.Session() as sess:
-    acc_over_time = []
-    # train_writer = tf.summary.FileWriter( './logs', sess.graph)
+        for epoch in range(20): #200
+            for Xs, ys in batchify(train_X, train_y, batches):
+                # Train
+                sess.run(train_step, feed_dict={ x: Xs, y_true: ys})
 
-    sess.run(init)
+        # check test acc
+            pred_ys_max_index = np.argmax(sess.run(y, feed_dict={x: val_X}), axis=1)
+            val_ys_max_index = np.argmax(val_y, axis=1)
 
-    batches = 8
-    batch_size = int(len(train_X)/batches)
+            val_acc = list(map(lambda x: x[0] == x[1], zip(pred_ys_max_index, val_ys_max_index)))
+            val_acc = np.count_nonzero(val_acc)/float(len(val_acc))
+            acc_over_time.append(val_acc)
 
-    for epoch in tqdm(range(10)): #200
-        for Xs, ys in batchify(train_X, train_y, batches):
-            # Train
-            sess.run(train_step, feed_dict={ x: Xs, y_true: ys})
+        layer_weights = get_layer_weights(sess, dnn_variables)
+        return acc_over_time, layer_weights
 
-            # merge = tf.summary.merge_all()
-            # summary, _ = sess.run([merge, train_step], feed_dict={ x: Xs, y_true: ys})
-            # train_writer.add_summary(summary, epoch)
+layer_params = [
+    LayerParam(type="input", params=784),
+    LayerParam(type="dense", params=512), 
+    LayerParam(type="dropout", params=.2), 
+    LayerParam(type="output", params=10)
+]
+set_layer_param_init_values(layer_params)
+init_layer_params = copy.deepcopy(layer_params)
 
-    # check test acc
-        pred_ys_max_index = np.argmax(sess.run(y, feed_dict={x: test_X}), axis=1)
-        test_ys_max_index = np.argmax(test_y, axis=1)
+BlacklistIndex = namedtuple("BlacklistIndex", ["layer", "wb", "index"])
+blacklist = set([])
+prune_percent = .02
 
-        test_acc = list(map(lambda x: x[0] == x[1], zip(pred_ys_max_index, test_ys_max_index)))
-        test_acc = np.count_nonzero(test_acc)/float(len(test_acc))
-        print("test test_acc", test_acc)
-        acc_over_time.append(test_acc)
+accs_over_time = []
 
-    print(confusion_matrix(test_ys_max_index, pred_ys_max_index))
-    plt.plot(acc_over_time)
-    plt.show()
+for experiment_num in tqdm(range(20)):
+    layer_params = copy.deepcopy(init_layer_params)
+    for blacklisted_value in blacklist:
+        layer, wb, index_list = blacklisted_value
+        layer_params[layer].init[wb][index_list] = 0
+
+    acc_over_time, weight_indices = experiment(layer_params)
+    accs_over_time.append((acc_over_time, (407050-len(blacklist))/4070.50))
+    print("experiment %s final acc %s %s%% network weights left" % (experiment_num, acc_over_time[-1], (407050-len(blacklist))/4070.50))
+    weight_indices.sort(key=lambda x: abs(x[0]))
+
+    prune_num = (len(weight_indices)-len(blacklist))*prune_percent
+    for weight_index in weight_indices:
+        weight, layer, wb, index = weight_index
+        if BlacklistIndex(layer=layer, wb=wb, index=index) not in blacklist:
+            blacklist.add(BlacklistIndex(layer=layer, wb=wb, index=index))
+            prune_num -= 1
+            if prune_num < 1:
+                break
+
+lines = []
+fig, ax = plt.subplots()
+for expr_num, (acc_over_time, network_left) in enumerate(accs_over_time):
+    color = expr_num/float(len(accs_over_time))
+    line = ax.plot(acc_over_time, label="%s%%" % network_left, color=(0, color, 0))
+
+ax.legend()
+plt.title("blacklist with weights updated at beginning")
+plt.show()
