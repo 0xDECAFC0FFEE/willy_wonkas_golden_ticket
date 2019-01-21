@@ -10,7 +10,7 @@ import copy
 import matplotlib.pyplot as plt
 from collections import namedtuple
 
-from deep_model import LayerParam, set_layer_param_init_values, build_deep_model, build_blacklist, update_blacklist
+from deep_model import LayerParam, set_layer_param_init_values, build_deep_model, build_blacklists
 
 def batchify(Xs, ys, batches):
     Xs, ys = shuffle(Xs, ys, random_state=0)
@@ -61,10 +61,10 @@ def get_layer_weights(sess, dnn_variables):
 
     return variables
 
-def experiment(layers_params, blacklisted):
+def experiment(layers_params, blacklist):
     (train_X, train_y), (val_X, val_y) = mnist_dataset()
 
-    x, y, y_true, dnn_variables = build_deep_model(layers_params)
+    x, y, y_true, dnn_variables = build_deep_model(layers_params, blacklist)
 
     loss = tf.reduce_mean(tf.losses.softmax_cross_entropy(y_true, y))
     train_step = tf.train.AdamOptimizer(learning_rate=.01).minimize(loss)
@@ -85,9 +85,9 @@ def experiment(layers_params, blacklisted):
             for Xs, ys in batchify(train_X, train_y, batches):
                 # Train
                 sess.run(train_step, feed_dict={ x: Xs, y_true: ys})
-                for variable_layer, blacklisted_layer in zip(dnn_variables, blacklisted):
-                    for variable, blacklisted_wb in zip(variable_layer, blacklisted_layer):
-                        variable.load(np.where(blacklisted_wb, sess.run(variable), 0), sess)
+                # for variable_layer, blacklist_layer in zip(dnn_variables, blacklist):
+                #     for variable, blacklist_wb in zip(variable_layer, blacklist_layer):
+                #         variable.load(np.where(blacklist_wb, sess.run(variable), 0), sess)
 
         # check test acc
             pred_ys_max_index = np.argmax(sess.run(y, feed_dict={x: val_X}), axis=1)
@@ -107,7 +107,7 @@ init_layers_params = [
     LayerParam(type="output", params=10)
 ]
 set_layer_param_init_values(init_layers_params)
-blacklisted, num_weights = build_blacklist(init_layers_params)
+blacklists, num_weights = build_blacklists(init_layers_params)
 num_weights_initial = num_weights
 num_weights_left = num_weights
 
@@ -116,22 +116,17 @@ accs_over_time = []
 
 for experiment_num in tqdm(range(20)):
     layers_params = copy.deepcopy(init_layers_params)
-    for layer_params, layer_blacklist in zip(layers_params, blacklisted):
-        if layer_params.init == None:
-            continue
-        for layer_param, layer_blacklisted_wb in zip(layer_params.init, layer_blacklist):
-            layer_param = np.where(layer_blacklisted_wb, layer_param, 0)
 
-    acc_over_time, weight_indices = experiment(layers_params, blacklisted)
+    acc_over_time, weight_indices = experiment(layers_params, blacklists)
     accs_over_time.append((acc_over_time, num_weights_left/num_weights_initial * 100))
     print("experiment %s final acc %s %s%% network weights left" % (experiment_num, acc_over_time[-1], num_weights_left/num_weights_initial *100))
 
     weight_indices.sort(key=lambda x: abs(x[0]))
     num_weights_left = num_weights_left*(1-prune_percent)
-    blacklisted, _ = build_blacklist(init_layers_params)
+    blacklists, _ = build_blacklists(init_layers_params)
     for weight_index, _ in zip(weight_indices, range(int(num_weights_initial-num_weights_left))):
         weight, layer, wb, index = weight_index
-        blacklisted[layer][wb][index] = False
+        blacklists[layer][wb][index] = False
 
 lines = []
 fig, ax = plt.subplots()
@@ -140,5 +135,5 @@ for expr_num, (acc_over_time, network_left) in enumerate(accs_over_time):
     line = ax.plot(acc_over_time, label="%s%%" % network_left, color=(0, color, 0), linewidth=.2)
 
 ax.legend()
-plt.title("blacklist with weights updated each epoch")
+plt.title("prune lowest n edges with modified graph")
 plt.show()

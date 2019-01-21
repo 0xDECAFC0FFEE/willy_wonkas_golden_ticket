@@ -28,32 +28,33 @@ def set_layer_param_init_values(layers_params):
         else:
             raise Exception("didnt find layer type", layer_type)
 
-def relu_layer(X, prev_layer_size, layer_size, init):
+def relu_layer(X, prev_layer_size, layer_size, init, blacklist):
     with tf.name_scope('relu_node'):
         W_shape = [prev_layer_size, layer_size]
         b_shape = [layer_size]
+        blacklist_W, blacklist_b = blacklist
         W, b = init
-        W = tf.Variable(initial_value=W)
-        b = tf.Variable(initial_value=b)
+        W = tf.where(blacklist_W, tf.Variable(initial_value=W), np.zeros(shape=blacklist_W.shape))
+        b = tf.where(blacklist_b, tf.Variable(initial_value=b), np.zeros(shape=blacklist_b.shape))
         return tf.nn.relu(tf.matmul(X, W) + b), (W, b)
 
-def softmax_layer(X, prev_layer_size, layer_size, init):
+def softmax_layer(X, prev_layer_size, layer_size, init, blacklist):
     with tf.name_scope('softmax_node'):
         W_shape = [prev_layer_size, layer_size]
         b_shape = [layer_size]
+        blacklist_W, blacklist_b = blacklist
         W, b = init
-        W = tf.Variable(initial_value=W)
-        b = tf.Variable(initial_value=b)
+        W = tf.where(blacklist_W, tf.Variable(initial_value=W), np.zeros(shape=blacklist_W.shape))
+        b = tf.where(blacklist_b, tf.Variable(initial_value=b), np.zeros(shape=blacklist_b.shape))
         return tf.nn.softmax(tf.matmul(X, W) + b), (W, b)
 
-
-def build_deep_model(layer_parameters):
+def build_deep_model(layer_parameters, blacklists):
     x = None # will be set in the init layer
     y_true = tf.placeholder(tf.float32, [None, layer_parameters[-1].params])
     prev_layer_size = None
     prev_layer_output = None
     dnn_variables = []
-    for layer_params in layer_parameters:
+    for layer_params, blacklist in zip(layer_parameters, blacklists):
         layer_type, params, init = layer_params
         if layer_type == "input":
             num_inputs = params
@@ -67,11 +68,11 @@ def build_deep_model(layer_parameters):
             variables = []
         elif layer_type == "dense":
             layer_size = params
-            prev_layer_output, variables = relu_layer(prev_layer_output, prev_layer_size, layer_size, init)
+            prev_layer_output, variables = relu_layer(prev_layer_output, prev_layer_size, layer_size, init, blacklist)
             prev_layer_size = layer_size
         elif layer_type == "output":
             layer_size = params
-            prev_layer_output, variables = softmax_layer(prev_layer_output, prev_layer_size, layer_size, init)
+            prev_layer_output, variables = softmax_layer(prev_layer_output, prev_layer_size, layer_size, init, blacklist)
             prev_layer_size = layer_size
         else:
             raise Exception("didnt find layer type", layer_type)
@@ -79,7 +80,7 @@ def build_deep_model(layer_parameters):
 
     return x, prev_layer_output, y_true, dnn_variables
 
-def build_blacklist(layers_params):
+def build_blacklists(layers_params):
     prev_layer_size = None
     prev_layer_output = None
     num_weights = 0
@@ -103,8 +104,3 @@ def build_blacklist(layers_params):
             raise Exception("didnt find layer type", layer_type)
 
     return blacklists, num_weights
-
-def update_blacklist(blacklists, blacklisted_index):
-    layer, wb, index_list = blacklisted_index
-    blacklists[layer][wb][index_list] = False
-    return blacklists
