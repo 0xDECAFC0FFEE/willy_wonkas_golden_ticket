@@ -76,20 +76,16 @@ def experiment(layers_params, blacklist):
         acc_over_time = []
 
         sess.run(init)
-        layer_weights = get_layer_weights(sess, dnn_variables)
 
         batches = 8
         batch_size = int(len(train_X)/batches)
 
-        for epoch in range(200): #200
+        for epoch in tqdm(range(200), leave=False, position=0): #200
             for Xs, ys in batchify(train_X, train_y, batches):
                 # Train
                 sess.run(train_step, feed_dict={ x: Xs, y_true: ys})
-                # for variable_layer, blacklist_layer in zip(dnn_variables, blacklist):
-                #     for variable, blacklist_wb in zip(variable_layer, blacklist_layer):
-                #         variable.load(np.where(blacklist_wb, sess.run(variable), 0), sess)
 
-        # check test acc
+            # check val acc
             pred_ys_max_index = np.argmax(sess.run(y, feed_dict={x: val_X}), axis=1)
             val_ys_max_index = np.argmax(val_y, axis=1)
 
@@ -102,24 +98,23 @@ def experiment(layers_params, blacklist):
 
 init_layers_params = [
     LayerParam(type="input", params=784),
-    LayerParam(type="dense", params=512), 
-    LayerParam(type="dropout", params=.2), 
-    LayerParam(type="output", params=10)
+    LayerParam(type="relu", params=512),
+    LayerParam(type="dropout", params=.2),
+    LayerParam(type="softmax", params=10)
 ]
 set_layer_param_init_values(init_layers_params)
-blacklists, num_weights = build_blacklists(init_layers_params)
-num_weights_initial = num_weights
-num_weights_left = num_weights
+blacklists, num_weights_initial = build_blacklists(init_layers_params)
+num_weights_left = num_weights_initial
 
 prune_percent = .2
 accs_over_time = []
 
-for experiment_num in tqdm(range(20)):
+for experiment_num in tqdm(range(20), leave=False, position=1):
     layers_params = copy.deepcopy(init_layers_params)
 
     acc_over_time, weight_indices = experiment(layers_params, blacklists)
     accs_over_time.append((acc_over_time, num_weights_left/num_weights_initial * 100))
-    print("experiment %s final acc %s %s%% network weights left" % (experiment_num, acc_over_time[-1], num_weights_left/num_weights_initial *100))
+    tqdm.write("experiment %s final acc %s %s%% network weights left" % (experiment_num, acc_over_time[-1], num_weights_left/num_weights_initial *100))
 
     weight_indices.sort(key=lambda x: abs(x[0]))
     num_weights_left = num_weights_left*(1-prune_percent)

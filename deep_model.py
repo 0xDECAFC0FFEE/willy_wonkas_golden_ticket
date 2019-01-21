@@ -14,7 +14,7 @@ def set_layer_param_init_values(layers_params):
             prev_layer_size = params
         elif layer_type == "dropout":
             pass
-        elif layer_type in ["dense", "output"]:
+        elif layer_type in ["relu", "softmax"]:
             layer_size = params
             W_shape = [prev_layer_size, layer_size]
             b_shape = [layer_size]
@@ -66,11 +66,11 @@ def build_deep_model(layer_parameters, blacklists):
             rate = params
             prev_layer_output = tf.layers.dropout(prev_layer_output, rate)
             variables = []
-        elif layer_type == "dense":
+        elif layer_type == "relu":
             layer_size = params
             prev_layer_output, variables = relu_layer(prev_layer_output, prev_layer_size, layer_size, init, blacklist)
             prev_layer_size = layer_size
-        elif layer_type == "output":
+        elif layer_type == "softmax":
             layer_size = params
             prev_layer_output, variables = softmax_layer(prev_layer_output, prev_layer_size, layer_size, init, blacklist)
             prev_layer_size = layer_size
@@ -92,7 +92,7 @@ def build_blacklists(layers_params):
             blacklists.append([])
         elif layer_type == "dropout":
             blacklists.append([])
-        elif layer_type in ["dense", "output"]:
+        elif layer_type in ["relu", "softmax"]:
             layer_size = params
             W_blacklist = np.full(shape=(prev_layer_size, layer_size), fill_value=True)
             b_blacklist = np.full(shape=(layer_size), fill_value=True)
