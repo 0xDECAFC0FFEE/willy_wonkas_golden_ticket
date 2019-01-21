@@ -81,13 +81,10 @@ def experiment(layers_params, blacklist):
         batches = 8
         batch_size = int(len(train_X)/batches)
 
-        for epoch in range(200): #200
+        for epoch in tqdm(range(50), position=0, leave=False): #200
             for Xs, ys in batchify(train_X, train_y, batches):
                 # Train
                 sess.run(train_step, feed_dict={ x: Xs, y_true: ys})
-                # for variable_layer, blacklist_layer in zip(dnn_variables, blacklist):
-                #     for variable, blacklist_wb in zip(variable_layer, blacklist_layer):
-                #         variable.load(np.where(blacklist_wb, sess.run(variable), 0), sess)
 
         # check test acc
             pred_ys_max_index = np.argmax(sess.run(y, feed_dict={x: val_X}), axis=1)
@@ -114,19 +111,16 @@ num_weights_left = num_weights
 prune_percent = .2
 accs_over_time = []
 
-for experiment_num in tqdm(range(20)):
+for experiment_num in tqdm(range(5), position=1, leave=False):
     layers_params = copy.deepcopy(init_layers_params)
 
     acc_over_time, weight_indices = experiment(layers_params, blacklists)
     accs_over_time.append((acc_over_time, num_weights_left/num_weights_initial * 100))
-    print("experiment %s final acc %s %s%% network weights left" % (experiment_num, acc_over_time[-1], num_weights_left/num_weights_initial *100))
+    tqdm.write("experiment %s final acc %s %s%% network weights left" % (experiment_num, acc_over_time[-1], num_weights_left/num_weights_initial *100))
 
     weight_indices.sort(key=lambda x: abs(x[0]))
     num_weights_left = num_weights_left*(1-prune_percent)
     blacklists, _ = build_blacklists(init_layers_params)
-    for weight_index, _ in zip(weight_indices, range(int(num_weights_initial-num_weights_left))):
-        weight, layer, wb, index = weight_index
-        blacklists[layer][wb][index] = False
 
 lines = []
 fig, ax = plt.subplots()
@@ -135,5 +129,5 @@ for expr_num, (acc_over_time, network_left) in enumerate(accs_over_time):
     line = ax.plot(acc_over_time, label="%s%%" % network_left, color=(0, color, 0), linewidth=.2)
 
 ax.legend()
-plt.title("prune lowest n edges with modified graph")
+plt.title("sanity check")
 plt.show()

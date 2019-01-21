@@ -32,20 +32,18 @@ def relu_layer(X, prev_layer_size, layer_size, init, blacklist):
     with tf.name_scope('relu_node'):
         W_shape = [prev_layer_size, layer_size]
         b_shape = [layer_size]
-        blacklist_W, blacklist_b = blacklist
         W, b = init
-        W = tf.where(blacklist_W, tf.Variable(initial_value=W), np.zeros(shape=blacklist_W.shape))
-        b = tf.where(blacklist_b, tf.Variable(initial_value=b), np.zeros(shape=blacklist_b.shape))
+        W = tf.Variable(initial_value=W)
+        b = tf.Variable(initial_value=b)
         return tf.nn.relu(tf.matmul(X, W) + b), (W, b)
 
 def softmax_layer(X, prev_layer_size, layer_size, init, blacklist):
     with tf.name_scope('softmax_node'):
         W_shape = [prev_layer_size, layer_size]
         b_shape = [layer_size]
-        blacklist_W, blacklist_b = blacklist
         W, b = init
-        W = tf.where(blacklist_W, tf.Variable(initial_value=W), np.zeros(shape=blacklist_W.shape))
-        b = tf.where(blacklist_b, tf.Variable(initial_value=b), np.zeros(shape=blacklist_b.shape))
+        W = tf.Variable(initial_value=W)
+        b = tf.Variable(initial_value=b)
         return tf.nn.softmax(tf.matmul(X, W) + b), (W, b)
 
 def build_deep_model(layer_parameters, blacklists):
