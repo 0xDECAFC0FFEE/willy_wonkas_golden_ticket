@@ -81,7 +81,7 @@ def experiment(layers_params, blacklisted):
         batches = 8
         batch_size = int(len(train_X)/batches)
 
-        for epoch in range(200): #200
+        for epoch in tqdm(range(200), leave=False, position=0): #200
             for Xs, ys in batchify(train_X, train_y, batches):
                 # Train
                 sess.run(train_step, feed_dict={ x: Xs, y_true: ys})
@@ -114,7 +114,7 @@ num_weights_left = num_weights
 prune_percent = .2
 accs_over_time = []
 
-for experiment_num in tqdm(range(20)):
+for experiment_num in tqdm(range(20), leave=False, position=1):
     layers_params = copy.deepcopy(init_layers_params)
     for layer_params, layer_blacklist in zip(layers_params, blacklisted):
         if layer_params.init == None:
@@ -124,7 +124,7 @@ for experiment_num in tqdm(range(20)):
 
     acc_over_time, weight_indices = experiment(layers_params, blacklisted)
     accs_over_time.append((acc_over_time, num_weights_left/num_weights_initial * 100))
-    print("experiment %s final acc %s %s%% network weights left" % (experiment_num, acc_over_time[-1], num_weights_left/num_weights_initial *100))
+    tqdm.write("experiment %s final acc %s %s%% network weights left" % (experiment_num, acc_over_time[-1], num_weights_left/num_weights_initial *100))
 
     weight_indices.sort(key=lambda x: abs(x[0]))
     num_weights_left = num_weights_left*(1-prune_percent)
@@ -140,5 +140,5 @@ for expr_num, (acc_over_time, network_left) in enumerate(accs_over_time):
     line = ax.plot(acc_over_time, label="%s%%" % network_left, color=(0, color, 0), linewidth=.2)
 
 ax.legend()
-plt.title("blacklist with weights updated each epoch")
+plt.title("prune lowest n edges updated each epoch")
 plt.show()
