@@ -109,11 +109,12 @@ init_layers_params = [
 set_layer_param_init_values(init_layers_params)
 blacklisted, num_weights = build_blacklist(init_layers_params)
 num_weights_initial = num_weights
+num_weights_left = num_weights
 
 prune_percent = .2
 accs_over_time = []
 
-for experiment_num in tqdm(range(3)):
+for experiment_num in tqdm(range(20)):
     layers_params = copy.deepcopy(init_layers_params)
     for layer_params, layer_blacklist in zip(layers_params, blacklisted):
         if layer_params.init == None:
@@ -122,20 +123,15 @@ for experiment_num in tqdm(range(3)):
             layer_param = np.where(layer_blacklisted_wb, layer_param, 0)
 
     acc_over_time, weight_indices = experiment(layers_params, blacklisted)
-    accs_over_time.append((acc_over_time, num_weights/num_weights_initial * 100))
-    print("experiment %s final acc %s %s%% network weights left" % (experiment_num, acc_over_time[-1], num_weights/num_weights_initial *100))
+    accs_over_time.append((acc_over_time, num_weights_left/num_weights_initial * 100))
+    print("experiment %s final acc %s %s%% network weights left" % (experiment_num, acc_over_time[-1], num_weights_left/num_weights_initial *100))
+
     weight_indices.sort(key=lambda x: abs(x[0]))
-
-    prune_num = (num_weights)*prune_percent
-    for weight_index in weight_indices:
+    num_weights_left = num_weights_left*(1-prune_percent)
+    blacklisted, _ = build_blacklist(init_layers_params)
+    for weight_index, _ in zip(weight_indices, range(int(num_weights_initial-num_weights_left))):
         weight, layer, wb, index = weight_index
-
-        if blacklisted[layer][wb][index] == True:
-            blacklisted[layer][wb][index] = False
-            num_weights -= 1
-            prune_num -= 1
-            if prune_num < 1:
-                break
+        blacklisted[layer][wb][index] = False
 
 lines = []
 fig, ax = plt.subplots()
