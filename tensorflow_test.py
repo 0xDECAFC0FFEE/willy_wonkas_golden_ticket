@@ -10,7 +10,7 @@ import copy
 import matplotlib.pyplot as plt
 from collections import namedtuple
 
-from deep_model import LayerParam, set_layer_param_init_values, build_deep_model, build_blacklists
+from deep_model import LayerParam, set_layer_param_init_values, build_deep_model, build_blacklists, LayerType
 
 def batchify(Xs, ys, batches):
     Xs, ys = shuffle(Xs, ys, random_state=0)
@@ -67,7 +67,7 @@ def experiment(layers_params, blacklist):
     x, y, y_true, dnn_variables = build_deep_model(layers_params, blacklist)
 
     loss = tf.reduce_mean(tf.losses.softmax_cross_entropy(y_true, y))
-    train_step = tf.train.AdamOptimizer(learning_rate=.01).minimize(loss)
+    train_step = tf.train.AdamOptimizer(learning_rate=.012).minimize(loss)
     init = tf.global_variables_initializer()
 
     # tpu_address = 'grpc://' + os.environ['COLAB_TPU_ADDR']
@@ -80,27 +80,30 @@ def experiment(layers_params, blacklist):
         batches = 8
         batch_size = int(len(train_X)/batches)
 
-        for epoch in tqdm(range(200), leave=False, position=0): #200
+        pbar = tqdm(range(50), leave=False, position=0) #50
+        for epoch in pbar:
             for Xs, ys in batchify(train_X, train_y, batches):
                 # Train
                 sess.run(train_step, feed_dict={ x: Xs, y_true: ys})
 
-            # check val acc
-            pred_ys_max_index = np.argmax(sess.run(y, feed_dict={x: val_X}), axis=1)
-            val_ys_max_index = np.argmax(val_y, axis=1)
+                # check val acc
+                pred_ys_max_index = np.argmax(sess.run(y, feed_dict={x: val_X}), axis=1)
+                val_ys_max_index = np.argmax(val_y, axis=1)
 
-            val_acc = list(map(lambda x: x[0] == x[1], zip(pred_ys_max_index, val_ys_max_index)))
-            val_acc = np.count_nonzero(val_acc)/float(len(val_acc))
-            acc_over_time.append(val_acc)
+                val_acc = list(map(lambda x: x[0] == x[1], zip(pred_ys_max_index, val_ys_max_index)))
+                val_acc = np.count_nonzero(val_acc)/float(len(val_acc))
+                acc_over_time.append(val_acc)
+
+            pbar.set_postfix({"acc": "%s" % round(val_acc, 4)})
 
         layer_weights = get_layer_weights(sess, dnn_variables)
         return acc_over_time, layer_weights
 
 init_layers_params = [
-    LayerParam(type="input", params=784),
-    LayerParam(type="relu", params=512),
-    LayerParam(type="dropout", params=.2),
-    LayerParam(type="softmax", params=10)
+    LayerParam(type=LayerType.input_1d, params=784),
+    LayerParam(type=LayerType.relu, params=512),
+    LayerParam(type=LayerType.dropout, params=.2),
+    LayerParam(type=LayerType.softmax, params=10)
 ]
 set_layer_param_init_values(init_layers_params)
 blacklists, num_weights_initial = build_blacklists(init_layers_params)
@@ -109,26 +112,29 @@ num_weights_left = num_weights_initial
 prune_percent = .2
 accs_over_time = []
 
-for experiment_num in tqdm(range(20), leave=False, position=1):
+for experiment_num in tqdm(range(25), leave=False, position=1): # 25
     layers_params = copy.deepcopy(init_layers_params)
 
     acc_over_time, weight_indices = experiment(layers_params, blacklists)
-    accs_over_time.append((acc_over_time, num_weights_left/num_weights_initial * 100))
-    tqdm.write("experiment %s final acc %s %s%% network weights left" % (experiment_num, acc_over_time[-1], num_weights_left/num_weights_initial *100))
+    accs_over_time.append((acc_over_time, num_weights_left/float(num_weights_initial) * 100))
+    tqdm.write("experiment %s final acc %s %s%% (%s) network weights left" % (experiment_num, acc_over_time[-1], round(num_weights_left/float(num_weights_initial) *100, 2), num_weights_left))
 
     weight_indices.sort(key=lambda x: abs(x[0]))
-    num_weights_left = num_weights_left*(1-prune_percent)
-    blacklists, _ = build_blacklists(init_layers_params)
-    for weight_index, _ in zip(weight_indices, range(int(num_weights_initial-num_weights_left))):
+    num_weights_left_target = int(float(num_weights_left)*(1-prune_percent))
+    for weight_index in weight_indices:
         weight, layer, wb, index = weight_index
-        blacklists[layer][wb][index] = False
+        if blacklists[layer][wb][index]:
+            blacklists[layer][wb][index] = False
+            num_weights_left -= 1
+            if num_weights_left_target >= num_weights_left:
+                break
 
 lines = []
 fig, ax = plt.subplots()
 for expr_num, (acc_over_time, network_left) in enumerate(accs_over_time):
     color = expr_num/float(len(accs_over_time))
-    line = ax.plot(acc_over_time, label="%s%%" % network_left, color=(0, color, 0), linewidth=.2)
+    line = ax.plot(acc_over_time, label="%s%% - acc: %s" % (round(network_left, 2), round(acc_over_time[-1], 4)), color=(0, color, 0), linewidth=.2)
 
 ax.legend()
-plt.title("prune lowest n edges with modified graph")
+plt.title("blacklist with modified graph")
 plt.show()

@@ -2,6 +2,12 @@ from collections import namedtuple
 import numpy as np
 import tensorflow as tf
 
+class LayerType:
+    input_1d = 0
+    dropout = 1
+    relu = 2
+    softmax = 3
+
 LayerParam = namedtuple("ModelLayerParams", ["type", "params", "init"])
 LayerParam.__new__.__defaults__ = (None, None, None)
 
@@ -10,11 +16,11 @@ def set_layer_param_init_values(layers_params):
     prev_layer_output = None
     for i, layer_params in enumerate(layers_params):
         layer_type, params, init = layer_params
-        if layer_type == "input":
+        if layer_type == LayerType.input_1d:
             prev_layer_size = params
-        elif layer_type == "dropout":
+        elif layer_type == LayerType.dropout:
             pass
-        elif layer_type in ["relu", "softmax"]:
+        elif layer_type in [LayerType.relu, LayerType.softmax]:
             layer_size = params
             W_shape = [prev_layer_size, layer_size]
             b_shape = [layer_size]
@@ -28,25 +34,12 @@ def set_layer_param_init_values(layers_params):
         else:
             raise Exception("didnt find layer type", layer_type)
 
-def relu_layer(X, prev_layer_size, layer_size, init, blacklist):
-    with tf.name_scope('relu_node'):
-        W_shape = [prev_layer_size, layer_size]
-        b_shape = [layer_size]
-        blacklist_W, blacklist_b = blacklist
-        W, b = init
-        W = tf.where(blacklist_W, tf.Variable(initial_value=W), np.zeros(shape=blacklist_W.shape))
-        b = tf.where(blacklist_b, tf.Variable(initial_value=b), np.zeros(shape=blacklist_b.shape))
-        return tf.nn.relu(tf.matmul(X, W) + b), (W, b)
-
-def softmax_layer(X, prev_layer_size, layer_size, init, blacklist):
-    with tf.name_scope('softmax_node'):
-        W_shape = [prev_layer_size, layer_size]
-        b_shape = [layer_size]
-        blacklist_W, blacklist_b = blacklist
-        W, b = init
-        W = tf.where(blacklist_W, tf.Variable(initial_value=W), np.zeros(shape=blacklist_W.shape))
-        b = tf.where(blacklist_b, tf.Variable(initial_value=b), np.zeros(shape=blacklist_b.shape))
-        return tf.nn.softmax(tf.matmul(X, W) + b), (W, b)
+def fc_layer(X, activation_function, init, blacklist):
+    blacklist_W, blacklist_b = blacklist
+    W, b = init
+    W = tf.where(blacklist_W, tf.Variable(initial_value=W), np.zeros(shape=blacklist_W.shape))
+    b = tf.where(blacklist_b, tf.Variable(initial_value=b), np.zeros(shape=blacklist_b.shape))
+    return activation_function(tf.matmul(X, W) + b), (W, b)
 
 def build_deep_model(layer_parameters, blacklists):
     x = None # will be set in the init layer
@@ -56,23 +49,23 @@ def build_deep_model(layer_parameters, blacklists):
     dnn_variables = []
     for layer_params, blacklist in zip(layer_parameters, blacklists):
         layer_type, params, init = layer_params
-        if layer_type == "input":
+        if layer_type == LayerType.input_1d:
             num_inputs = params
-            x = tf.placeholder(tf.float32, [None, num_inputs]) # equivalent to x
+            x = tf.placeholder(tf.float32, [None, num_inputs])
             prev_layer_output = x
             prev_layer_size = num_inputs
             variables = []
-        elif layer_type == "dropout":
+        elif layer_type == LayerType.dropout:
             rate = params
             prev_layer_output = tf.layers.dropout(prev_layer_output, rate)
             variables = []
-        elif layer_type == "relu":
+        elif layer_type == LayerType.relu:
             layer_size = params
-            prev_layer_output, variables = relu_layer(prev_layer_output, prev_layer_size, layer_size, init, blacklist)
+            prev_layer_output, variables = fc_layer(prev_layer_output, tf.nn.relu, init, blacklist)
             prev_layer_size = layer_size
-        elif layer_type == "softmax":
+        elif layer_type == LayerType.softmax:
             layer_size = params
-            prev_layer_output, variables = softmax_layer(prev_layer_output, prev_layer_size, layer_size, init, blacklist)
+            prev_layer_output, variables = fc_layer(prev_layer_output, tf.nn.softmax, init, blacklist)
             prev_layer_size = layer_size
         else:
             raise Exception("didnt find layer type", layer_type)
@@ -87,12 +80,12 @@ def build_blacklists(layers_params):
     blacklists = []
     for layer_params in layers_params:
         layer_type, params, init = layer_params
-        if layer_type == "input":
+        if layer_type == LayerType.input_1d:
             prev_layer_size = params
             blacklists.append([])
-        elif layer_type == "dropout":
+        elif layer_type == LayerType.dropout:
             blacklists.append([])
-        elif layer_type in ["relu", "softmax"]:
+        elif layer_type in [LayerType.relu, LayerType.softmax]:
             layer_size = params
             W_blacklist = np.full(shape=(prev_layer_size, layer_size), fill_value=True)
             b_blacklist = np.full(shape=(layer_size), fill_value=True)
