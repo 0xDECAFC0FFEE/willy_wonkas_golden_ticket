@@ -10,7 +10,7 @@ import copy
 import matplotlib.pyplot as plt
 from collections import namedtuple
 
-from deep_model import LayerParam, set_layer_param_init_values, build_deep_model, build_blacklists, LayerType
+from deep_model import LayerDefinition, set_layer_definitions_init_values, build_deep_model, build_blacklists, LayerType
 
 def batchify(Xs, ys, batches):
     Xs, ys = shuffle(Xs, ys, random_state=0)
@@ -22,9 +22,6 @@ def mnist_dataset():
     raw_data = tf.keras.datasets.mnist.load_data(path='mnist.npz')
     train_X, train_y_raw = raw_data[0]
     val_X, val_y_raw = raw_data[1]
-
-    train_X = train_X.reshape((len(train_X), 784))
-    val_X = val_X.reshape((len(val_X), 784))
 
     # normalizing x values in [0, 1]
     train_X = train_X/255.0
@@ -38,9 +35,9 @@ def mnist_dataset():
 
     return (train_X, train_y), (val_X, val_y)
 
-WeightIndex = namedtuple("WeightIndex", ["weight", "layer", "wb", "index"])
-
 def get_layer_weights(sess, dnn_variables):
+    WeightIndex = namedtuple("WeightIndex", ["weight", "layer", "wb", "index"])
+
     def get_weights(i_l, i_wb, i_cur, weights):
         if len(weights.shape) > 1:
             weight_indices = []
@@ -61,10 +58,18 @@ def get_layer_weights(sess, dnn_variables):
 
     return variables
 
-def experiment(layers_params, blacklist):
+def accuracy_1_hot(pred, true):
+    pred_ys_max_index = np.argmax(pred, axis=1)
+    true_ys_max_index = np.argmax(true, axis=1)
+    acc = list(map(lambda x: x[0] == x[1], zip(pred_ys_max_index, true_ys_max_index)))
+    acc = np.count_nonzero(acc)/float(len(acc))
+    return acc
+
+def experiment(num_epochs, layer_definitions, blacklist):
     (train_X, train_y), (val_X, val_y) = mnist_dataset()
 
-    x, y, y_true, dnn_variables = build_deep_model(layers_params, blacklist)
+    # build model from layer definition
+    x, y, y_true, dnn_variables = build_deep_model(layer_definitions, blacklist)
 
     loss = tf.reduce_mean(tf.losses.softmax_cross_entropy(y_true, y))
     train_step = tf.train.AdamOptimizer(learning_rate=.012).minimize(loss)
@@ -73,52 +78,60 @@ def experiment(layers_params, blacklist):
     # tpu_address = 'grpc://' + os.environ['COLAB_TPU_ADDR']
     # with tf.Session(tpu_address) as sess:
     with tf.Session() as sess:
-        acc_over_time = []
-
         sess.run(init)
 
         batches = 8
         batch_size = int(len(train_X)/batches)
 
-        pbar = tqdm(range(50), leave=False, position=0) #50
+        expr_train_accs, expr_val_accs = [], []
+
+        pbar = tqdm(range(num_epochs), leave=False, position=0)
         for epoch in pbar:
             for Xs, ys in batchify(train_X, train_y, batches):
                 # Train
                 sess.run(train_step, feed_dict={ x: Xs, y_true: ys})
 
-                # check val acc
-                pred_ys_max_index = np.argmax(sess.run(y, feed_dict={x: val_X}), axis=1)
-                val_ys_max_index = np.argmax(val_y, axis=1)
-
-                val_acc = list(map(lambda x: x[0] == x[1], zip(pred_ys_max_index, val_ys_max_index)))
-                val_acc = np.count_nonzero(val_acc)/float(len(val_acc))
-                acc_over_time.append(val_acc)
-
-            pbar.set_postfix({"acc": "%s" % round(val_acc, 4)})
+            # accuracy measures
+            train_acc = accuracy_1_hot(sess.run(y, feed_dict={x: train_X}), train_y)
+            expr_train_accs.append(train_acc)
+            val_acc = accuracy_1_hot(sess.run(y, feed_dict={x: val_X}), val_y)
+            expr_val_accs.append(val_acc)
+            pbar.set_postfix({"val acc": "%s" % round(val_acc, 4)})
 
         layer_weights = get_layer_weights(sess, dnn_variables)
-        return acc_over_time, layer_weights
-
-init_layers_params = [
-    LayerParam(type=LayerType.input_1d, params=784),
-    LayerParam(type=LayerType.relu, params=512),
-    LayerParam(type=LayerType.dropout, params=.2),
-    LayerParam(type=LayerType.softmax, params=10)
-]
-set_layer_param_init_values(init_layers_params)
-blacklists, num_weights_initial = build_blacklists(init_layers_params)
-num_weights_left = num_weights_initial
+        return layer_weights, expr_train_accs, expr_val_accs
 
 prune_percent = .2
-accs_over_time = []
+num_epochs = 100 #50
+num_pruining_iterations = 20 # 20
 
-for experiment_num in tqdm(range(25), leave=False, position=1): # 25
-    layers_params = copy.deepcopy(init_layers_params)
+# define neural network
+init_layer_definitions = [
+    LayerDefinition(type=LayerType.input_2d, params={"image_width":28, "image_height":28}),
+    LayerDefinition(type=LayerType.flatten),
+    LayerDefinition(type=LayerType.relu, params={"layer_size": 512}),
+    LayerDefinition(type=LayerType.dropout, params={"rate": .2}),
+    LayerDefinition(type=LayerType.softmax, params={"layer_size": 10})
+]
+num_weights_initial = set_layer_definitions_init_values(init_layer_definitions)
+blacklists = build_blacklists(init_layer_definitions)
 
-    acc_over_time, weight_indices = experiment(layers_params, blacklists)
-    accs_over_time.append((acc_over_time, num_weights_left/float(num_weights_initial) * 100))
-    tqdm.write("experiment %s final acc %s %s%% (%s) network weights left" % (experiment_num, acc_over_time[-1], round(num_weights_left/float(num_weights_initial) *100, 2), num_weights_left))
+# train and test an NN and update the blacklist
+expr_train_accs_list, expr_val_accs_list = [], []
+num_weights_left = num_weights_initial
+for experiment_num in tqdm(range(num_pruining_iterations), leave=False, position=1):
+    layer_definitions = copy.deepcopy(init_layer_definitions)
 
+    # train and test blacklisted NN
+    weight_indices, expr_train_accs, expr_val_accs = experiment(num_epochs, layer_definitions, blacklists)
+    expr_val_accs_list.append((expr_val_accs, num_weights_left/float(num_weights_initial) * 100))
+    expr_train_accs_list.append((expr_train_accs, num_weights_left/float(num_weights_initial) * 100))
+
+    # output current NN scores
+    round(num_weights_left/float(num_weights_initial) *100, 2)
+    tqdm.write("experiment %s val acc %s train acc %s %s%% (%s) network weights left" % (experiment_num, expr_val_accs[-1], expr_train_accs[-1], percent_weights_left, num_weights_left))
+
+    # update blacklist
     weight_indices.sort(key=lambda x: abs(x[0]))
     num_weights_left_target = int(float(num_weights_left)*(1-prune_percent))
     for weight_index in weight_indices:
@@ -129,12 +142,24 @@ for experiment_num in tqdm(range(25), leave=False, position=1): # 25
             if num_weights_left_target >= num_weights_left:
                 break
 
-lines = []
-fig, ax = plt.subplots()
-for expr_num, (acc_over_time, network_left) in enumerate(accs_over_time):
-    color = expr_num/float(len(accs_over_time))
-    line = ax.plot(acc_over_time, label="%s%% - acc: %s" % (round(network_left, 2), round(acc_over_time[-1], 4)), color=(0, color, 0), linewidth=.2)
 
+# graph accuracy
+fig, ax = plt.subplots()
+for expr_num, (expr_train_accs, network_left) in enumerate(expr_train_accs_list):
+    color = expr_num/float(len(expr_train_accs_list))
+    line = ax.plot(expr_train_accs, label="%s%% - acc: %s" % (round(network_left, 2), round(expr_train_accs[-1], 4)), color=(0, color, 0), linewidth=.2)
 ax.legend()
-plt.title("blacklist with modified graph")
+plt.title("blacklist with modified graph training accuracy")
+plt.xlabel("epoch")
+plt.ylabel("train acc")
+plt.show()
+
+fig, ax = plt.subplots()
+for expr_num, (expr_val_accs, network_left) in enumerate(expr_val_accs_list):
+    color = expr_num/float(len(expr_val_accs_list))
+    line = ax.plot(expr_val_accs, label="%s%% - acc: %s" % (round(network_left, 2), round(expr_val_accs[-1], 4)), color=(0, color, 0), linewidth=.2)
+ax.legend()
+plt.title("blacklist with modified graph validation accuracy")
+plt.xlabel("epoch")
+plt.ylabel("val acc")
 plt.show()
