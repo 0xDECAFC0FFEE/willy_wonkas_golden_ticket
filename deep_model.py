@@ -88,19 +88,17 @@ def build_deep_model(layer_definitions, blacklists):
             layer_size = params["layer_size"]
             prev_layer_output, variables = fc_layer(prev_layer_output, tf.nn.softmax, init, blacklist)
             prev_layer_size = layer_size
-        elif layer_type == LayerType.conv:
-            num_layers, conv_width = params["num_layers"], params["conv_width"]
-            image_width, image_height = prev_layer_size
-            init_kernels, init_b = init
+        # elif layer_type == LayerType.conv:
+        #     num_layers, conv_width = params["num_layers"], params["conv_width"]
+        #     image_width, image_height = prev_layer_size
+        #     init_kernels, init_b = init
 
-            kernels = tf.variable(initial_value=init_kernel)
+        #     kernels = tf.variable(initial_value=init_kernel)
 
-            np.full(shape=[image_width+conv_width-1, image_height+conv_width-1, num_layers], kernels[])
+        #     np.full(shape=[image_width+conv_width-1, image_height+conv_width-1, num_layers], kernels[])
 
-
-
-            prev_layer_output, variables = fc_layer(prev_layer_output, tf.nn.softmax, init, blacklist)
-            prev_layer_size = layer_size
+        #     prev_layer_output, variables = fc_layer(prev_layer_output, tf.nn.softmax, init, blacklist)
+        #     prev_layer_size = layer_size
         else:
             raise Exception("didnt find layer type", layer_type)
         dnn_variables.append(variables)
