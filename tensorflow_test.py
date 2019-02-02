@@ -9,6 +9,8 @@ from sklearn.metrics import confusion_matrix
 import copy
 import matplotlib.pyplot as plt
 from collections import namedtuple
+import random
+import string
 
 from deep_model import LayerDefinition, set_layer_definitions_init_values, build_deep_model, build_blacklists, LayerType
 
@@ -101,8 +103,21 @@ def experiment(num_epochs, layer_definitions, blacklist):
         layer_weights = get_layer_weights(sess, dnn_variables)
         return layer_weights, expr_train_accs, expr_val_accs
 
+def graph_accuracy(network_left_accs_list, name, filename):
+    fig, ax = plt.subplots()
+    for expr_num, (expr_train_accs, network_left) in enumerate(network_left_accs_list):
+        color = expr_num/float(len(network_left_accs_list))
+        line = ax.plot(expr_train_accs, label="%s%% - acc: %s" % (round(network_left, 2), round(expr_train_accs[-1], 4)), color=(0, color, 0), linewidth=.2)
+    ax.legend()
+    plt.title(name)
+    plt.xlabel("epoch")
+    plt.ylabel("acc")
+    # plt.show()
+    plt.savefig(filename)
+
+experiment_num = "".join(random.sample(string.ascii_lowercase+string.ascii_uppercase+string.digits, 30))
 prune_percent = .2
-num_epochs = 100 #50
+num_epochs = 50 #50
 num_pruining_iterations = 20 # 20
 
 # define neural network
@@ -119,7 +134,7 @@ blacklists = build_blacklists(init_layer_definitions)
 # train and test an NN and update the blacklist
 expr_train_accs_list, expr_val_accs_list = [], []
 num_weights_left = num_weights_initial
-for experiment_num in tqdm(range(num_pruining_iterations), leave=False, position=1):
+for run_num in tqdm(range(num_pruining_iterations), leave=False, position=1):
     layer_definitions = copy.deepcopy(init_layer_definitions)
 
     # train and test blacklisted NN
@@ -127,11 +142,11 @@ for experiment_num in tqdm(range(num_pruining_iterations), leave=False, position
     expr_val_accs_list.append((expr_val_accs, num_weights_left/float(num_weights_initial) * 100))
     expr_train_accs_list.append((expr_train_accs, num_weights_left/float(num_weights_initial) * 100))
 
-    # output current NN scores
-    round(num_weights_left/float(num_weights_initial) *100, 2)
-    tqdm.write("experiment %s val acc %s train acc %s %s%% (%s) network weights left" % (experiment_num, expr_val_accs[-1], expr_train_accs[-1], percent_weights_left, num_weights_left))
+    # print final nn accuracy scores to terminal
+    percent_weights_left = round(num_weights_left/float(num_weights_initial) *100, 2)
+    tqdm.write("experiment %s val acc %s train acc %s %s%% (%s) network weights left" % (run_num, expr_val_accs[-1], expr_train_accs[-1], percent_weights_left, num_weights_left))
 
-    # update blacklist
+    # update blacklist with run results
     weight_indices.sort(key=lambda x: abs(x[0]))
     num_weights_left_target = int(float(num_weights_left)*(1-prune_percent))
     for weight_index in weight_indices:
@@ -142,24 +157,7 @@ for experiment_num in tqdm(range(num_pruining_iterations), leave=False, position
             if num_weights_left_target >= num_weights_left:
                 break
 
-
-# graph accuracy
-fig, ax = plt.subplots()
-for expr_num, (expr_train_accs, network_left) in enumerate(expr_train_accs_list):
-    color = expr_num/float(len(expr_train_accs_list))
-    line = ax.plot(expr_train_accs, label="%s%% - acc: %s" % (round(network_left, 2), round(expr_train_accs[-1], 4)), color=(0, color, 0), linewidth=.2)
-ax.legend()
-plt.title("blacklist with modified graph training accuracy")
-plt.xlabel("epoch")
-plt.ylabel("train acc")
-plt.show()
-
-fig, ax = plt.subplots()
-for expr_num, (expr_val_accs, network_left) in enumerate(expr_val_accs_list):
-    color = expr_num/float(len(expr_val_accs_list))
-    line = ax.plot(expr_val_accs, label="%s%% - acc: %s" % (round(network_left, 2), round(expr_val_accs[-1], 4)), color=(0, color, 0), linewidth=.2)
-ax.legend()
-plt.title("blacklist with modified graph validation accuracy")
-plt.xlabel("epoch")
-plt.ylabel("val acc")
-plt.show()
+filename = "graphs/blacklist_modify_graph/experiment_%s_train.png" % experiment_num
+graph_accuracy(expr_train_accs_list, "blacklist with modified graph training accuracy", filename)
+filename = "graphs/blacklist_modify_graph/experiment_%s_val.png" % experiment_num
+graph_accuracy(expr_val_accs_list, "blacklist with modified graph validation accuracy", filename)
