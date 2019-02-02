@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 from collections import namedtuple
 import random
 import string
+from pathlib import Path
 
 from deep_model import LayerDefinition, set_layer_definitions_init_values, build_deep_model, build_blacklists, LayerType
 
@@ -103,7 +104,8 @@ def experiment(num_epochs, layer_definitions, blacklist):
         layer_weights = get_layer_weights(sess, dnn_variables)
         return layer_weights, expr_train_accs, expr_val_accs
 
-def graph_accuracy(network_left_accs_list, name, filename):
+def graph_accuracy(network_left_accs_list, name, filepath):
+    plt.rcParams["figure.figsize"] = [16, 9]
     fig, ax = plt.subplots()
     for expr_num, (expr_train_accs, network_left) in enumerate(network_left_accs_list):
         color = expr_num/float(len(network_left_accs_list))
@@ -112,13 +114,14 @@ def graph_accuracy(network_left_accs_list, name, filename):
     plt.title(name)
     plt.xlabel("epoch")
     plt.ylabel("acc")
-    # plt.show()
-    plt.savefig(filename)
+    Path(*filepath).parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(Path(*filepath))
+    print("saved %s at %s" % (name, Path(*filepath)))
 
 experiment_num = "".join(random.sample(string.ascii_lowercase+string.ascii_uppercase+string.digits, 30))
 prune_percent = .2
-num_epochs = 50 #50
-num_pruining_iterations = 20 # 20
+num_epochs = 3 #50
+num_pruining_iterations = 3 # 20
 
 # define neural network
 init_layer_definitions = [
@@ -157,7 +160,7 @@ for run_num in tqdm(range(num_pruining_iterations), leave=False, position=1):
             if num_weights_left_target >= num_weights_left:
                 break
 
-filename = "graphs/blacklist_modify_graph/experiment_%s_train.png" % experiment_num
+filename = ["graphs", "blacklist_modify_graph","experiment_%s" % experiment_num, "train.png"]
 graph_accuracy(expr_train_accs_list, "blacklist with modified graph training accuracy", filename)
-filename = "graphs/blacklist_modify_graph/experiment_%s_val.png" % experiment_num
+filename = ["graphs", "blacklist_modify_graph","experiment_%s" % experiment_num, "val.png"]
 graph_accuracy(expr_val_accs_list, "blacklist with modified graph validation accuracy", filename)
