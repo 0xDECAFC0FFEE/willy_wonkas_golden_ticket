@@ -13,13 +13,13 @@ import string
 from pathlib import Path
 
 from deep_model import LayerDefinition, set_layer_definitions_init_values, build_deep_model, build_blacklists, LayerType, get_layer_weights, count_nonzero_weights
-from analysis import graph_accuracy
+from analysis import graph_accuracy, draw_graph
 from io_funcs import mnist_dataset, load_NN, save_NN, expr_record_path
 
 # configuration
 prune_percent = .2
-num_epochs = 60 # 60
-num_pruining_iterations = 20 # 20
+num_epochs = 2 # 60
+num_pruining_iterations = 1 # 20
 # NN definition
 init_layer_definitions = [
     LayerDefinition(type=LayerType.input_2d, params={"image_width":28, "image_height":28}),
@@ -32,15 +32,15 @@ num_weights_initial = set_layer_definitions_init_values(init_layer_definitions)
 num_weights_left = num_weights_initial
 blacklists = build_blacklists(init_layer_definitions)
 
-# # load saved network
-# saved_location = ["expr_records", "blacklist_modify_graph", "exp_2019-02-02 ran to breaking point", "NN_definition"]
-# defaults = {
-#     "blacklists": blacklists,
-#     "init_layer_definitions": init_layer_definitions, 
-#     "num_weights": num_weights_initial, 
-#     "num_weights_left": num_weights_left
-# }
-# blacklists, init_layer_definitions, num_weights_initial, num_weights_left = load_NN(saved_location, defaults)
+# load saved network
+saved_location = ["expr_records", "blacklist_modify_graph", "exp_2019-02-02 20:27:23.310040 99.4%", "NN_definition"]
+defaults = {
+    "blacklists": blacklists,
+    "init_layer_definitions": init_layer_definitions, 
+    "num_weights": num_weights_initial, 
+    "num_weights_left": num_weights_left
+}
+blacklists, init_layer_definitions, num_weights_initial, num_weights_left = load_NN(saved_location, defaults)
 
 def batchify(Xs, ys, batches):
     Xs, ys = shuffle(Xs, ys, random_state=0)
@@ -127,3 +127,4 @@ filename = expr_record_path + ["train.png"]
 graph_accuracy(expr_train_accs_list, "blacklist with modified graph training accuracy", filename)
 filename = expr_record_path + ["val.png"]
 graph_accuracy(expr_val_accs_list, "blacklist with modified graph validation accuracy", filename)
+draw_graph(init_layer_definitions, blacklists)
