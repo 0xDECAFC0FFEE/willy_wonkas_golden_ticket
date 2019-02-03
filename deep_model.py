@@ -1,6 +1,7 @@
 from collections import namedtuple
 import numpy as np
 import tensorflow as tf
+from functools import reduce
 
 class LayerType:
     input_1d = "input_1d"
@@ -24,8 +25,7 @@ def set_layer_definitions_init_values(layer_definitions):
         elif layer_type == LayerType.input_2d:
             prev_layer_size = params["image_width"], params["image_height"]
         elif layer_type == LayerType.flatten:
-            image_width, image_height = prev_layer_size
-            prev_layer_size = image_width*image_height
+            prev_layer_size = reduce(lambda a, b: a*b, prev_layer_size, 1)
         elif layer_type == LayerType.dropout:
             pass
         elif layer_type in [LayerType.relu, LayerType.softmax]:
@@ -35,10 +35,11 @@ def set_layer_definitions_init_values(layer_definitions):
             W = tf.Session().run(tf.contrib.layers.xavier_initializer()(W_shape))
             b = tf.Session().run(tf.contrib.layers.xavier_initializer()(b_shape))
             layer_definitions[i] = layer_definitions[i]._replace(init=(W, b))
-            prev_layer_size = layer_size
 
             num_weights += prev_layer_size*layer_size
             num_weights += layer_size
+
+            prev_layer_size = layer_size
         else:
             raise Exception("didnt find layer type", layer_type)
     return num_weights
@@ -46,8 +47,8 @@ def set_layer_definitions_init_values(layer_definitions):
 def fc_layer(X, activation_function, init, blacklist):
     blacklist_W, blacklist_b = blacklist
     W, b = init
-    W = tf.where(blacklist_W, tf.Variable(initial_value=W), np.zeros(shape=blacklist_W.shape))
-    b = tf.where(blacklist_b, tf.Variable(initial_value=b), np.zeros(shape=blacklist_b.shape))
+    W = tf.where(tf.constant(blacklist_W), tf.Variable(initial_value=W), np.zeros(shape=blacklist_W.shape))
+    b = tf.where(tf.constant(blacklist_b), tf.Variable(initial_value=b), np.zeros(shape=blacklist_b.shape))
     return activation_function(tf.matmul(X, W) + b), (W, b)
 
 def build_deep_model(layer_definitions, blacklists):
@@ -72,9 +73,9 @@ def build_deep_model(layer_definitions, blacklists):
             prev_layer_size = (image_width, image_height)
             variables = []
         elif layer_type == LayerType.flatten:
-            image_width, image_height = prev_layer_size
+            prev_layer_size = prev_layer_size
             prev_layer_output = tf.layers.flatten(prev_layer_output)
-            prev_layer_size = image_width * image_height
+            prev_layer_size = reduce(lambda a, b: a*b, prev_layer_size, 1)
             variables = []
         elif layer_type == LayerType.dropout:
             rate = params["rate"]
@@ -88,17 +89,6 @@ def build_deep_model(layer_definitions, blacklists):
             layer_size = params["layer_size"]
             prev_layer_output, variables = fc_layer(prev_layer_output, tf.nn.softmax, init, blacklist)
             prev_layer_size = layer_size
-        # elif layer_type == LayerType.conv:
-        #     num_layers, conv_width = params["num_layers"], params["conv_width"]
-        #     image_width, image_height = prev_layer_size
-        #     init_kernels, init_b = init
-
-        #     kernels = tf.variable(initial_value=init_kernel)
-
-        #     np.full(shape=[image_width+conv_width-1, image_height+conv_width-1, num_layers], kernels[])
-
-        #     prev_layer_output, variables = fc_layer(prev_layer_output, tf.nn.softmax, init, blacklist)
-        #     prev_layer_size = layer_size
         else:
             raise Exception("didnt find layer type", layer_type)
         dnn_variables.append(variables)
@@ -118,8 +108,7 @@ def build_blacklists(layer_definitions):
             prev_layer_size = params["image_width"], params["image_height"]
             blacklists.append([])
         elif layer_type == LayerType.flatten:
-            image_width, image_height = prev_layer_size
-            prev_layer_size = image_width*image_height
+            prev_layer_size = reduce(lambda a, b: a*b, prev_layer_size, 1)
             blacklists.append([])
         elif layer_type == LayerType.dropout:
             blacklists.append([])
@@ -133,3 +122,46 @@ def build_blacklists(layer_definitions):
             raise Exception("didnt find layer type", layer_type)
 
     return blacklists
+
+def get_layer_weights(sess, dnn_variables):
+    WeightIndex = namedtuple("WeightIndex", ["weight", "layer", "wb", "index"])
+
+    def get_weights(i_l, i_wb, i_cur, weights):
+        if len(weights.shape) > 1:
+            weight_indices = []
+            for i, weight in enumerate(weights):
+                c_weights = get_weights(i_l, i_wb, i_cur+(i,), weight)
+                weight_indices.extend(c_weights)
+            return weight_indices
+        elif len(weights.shape) == 1:
+            return [WeightIndex(weight, i_l, i_wb, i_cur+(i,)) for i, weight in enumerate(weights)]
+        else:
+            raise Exception("unexpected weights value %s" % weighs)
+
+    variables = []
+    for i_l, layer in enumerate(dnn_variables):
+        for i_wb, weight_variables in enumerate(layer):
+            weight_values = sess.run(weight_variables)
+            variables.extend(get_weights(i_l, i_wb, tuple(), weight_values))
+
+    return variables
+
+def count_nonzero_weights(sess, dnn_variables):
+    def get_weights(weights, cur_count):
+        if len(weights.shape) > 1:
+            for weight in weights:
+                get_weights(weight, cur_count)
+        elif len(weights.shape) == 1:
+            cur_count[0] += sum([weight != 0 for weight in weights])
+        else:
+            raise Exception("unexpected weights value %s" % weighs)
+
+    count = [0] # using a list as a pointer
+    for layer in dnn_variables:
+        for weight_variables in layer:
+            weight_values = sess.run(weight_variables)
+            get_weights(weight_values, count)
+
+    return count[0]
+
+# def count_nonzero_weights(sess, dnn_variables):
