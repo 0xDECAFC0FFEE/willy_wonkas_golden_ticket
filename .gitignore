@@ -1,2 +1,3 @@
 tensorflow_xor_test.py
 *.pyc
+model_graph

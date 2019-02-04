@@ -1,11 +1,7 @@
 import tensorflow as tf
 import numpy as np
-from datetime import datetime
 from pathlib import Path
 import pickle
-
-start_timestamp = str(datetime.now())
-expr_record_path = ["expr_records", "blacklist_modify_graph","exp_%s" % start_timestamp]
 
 def mnist_dataset():
     raw_data = tf.keras.datasets.mnist.load_data(path='mnist.npz')

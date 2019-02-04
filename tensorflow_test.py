@@ -11,15 +11,17 @@ from collections import namedtuple
 import random
 import string
 from pathlib import Path
+from datetime import datetime
+from sys import argv
 
 from deep_model import LayerDefinition, set_layer_definitions_init_values, build_deep_model, build_blacklists, LayerType, get_layer_weights, count_nonzero_weights
 from analysis import graph_accuracy, draw_graph
-from io_funcs import mnist_dataset, load_NN, save_NN, expr_record_path
+from io_funcs import mnist_dataset, load_NN, save_NN
 
 # configuration
 prune_percent = .2
-num_epochs = 2 # 60
-num_pruining_iterations = 1 # 20
+num_epochs = 60 # 60
+num_pruning_iterations = 40 # 20
 # NN definition
 init_layer_definitions = [
     LayerDefinition(type=LayerType.input_2d, params={"image_width":28, "image_height":28}),
@@ -33,14 +35,14 @@ num_weights_left = num_weights_initial
 blacklists = build_blacklists(init_layer_definitions)
 
 # load saved network
-saved_location = ["expr_records", "blacklist_modify_graph", "exp_2019-02-02 20:27:23.310040 99.4%", "NN_definition"]
-defaults = {
-    "blacklists": blacklists,
-    "init_layer_definitions": init_layer_definitions, 
-    "num_weights": num_weights_initial, 
-    "num_weights_left": num_weights_left
-}
+saved_location = ["expr_records", "blacklist_modify_graph", 'exp_2019-02-03 04:38:12.695401_(60|30)_"more network weights = more stuff to prune? = higher final acc?"', "NN_definition"]
+defaults = {}
 blacklists, init_layer_definitions, num_weights_initial, num_weights_left = load_NN(saved_location, defaults)
+
+start_timestamp = str(datetime.now())
+expr_name = 'exp_%s-(%s|%s)-"%s"' % (start_timestamp, num_epochs, num_pruning_iterations, argv[1])
+expr_record_path = ["expr_records", "blacklist_modify_graph", expr_name]
+print('starting %s' % expr_name)
 
 def batchify(Xs, ys, batches):
     Xs, ys = shuffle(Xs, ys, random_state=0)
@@ -96,7 +98,7 @@ def experiment(num_epochs, layer_definitions, blacklist):
 
 # train and test an NN and update the blacklist
 expr_train_accs_list, expr_val_accs_list = [], []
-for run_num in tqdm(range(num_pruining_iterations), leave=False, position=1):
+for run_num in tqdm(range(num_pruning_iterations), leave=False, position=1):
     layer_definitions = copy.deepcopy(init_layer_definitions)
 
     # train and test blacklisted NN
@@ -109,7 +111,7 @@ for run_num in tqdm(range(num_pruining_iterations), leave=False, position=1):
     tqdm.write("experiment %s val acc %s train acc %s %s%% (%s) network weights left" % (run_num, expr_val_accs[-1], expr_train_accs[-1], percent_weights_left, num_weights_left))
 
     # update blacklist with run results
-    if run_num == num_pruining_iterations-1:
+    if run_num == num_pruning_iterations-1:
         break # don't update blacklist if its the last iteration for logging purposes
     weight_indices.sort(key=lambda x: abs(x[0]))
     num_weights_left_target = int(float(num_weights_left)*(1-prune_percent))
@@ -127,4 +129,4 @@ filename = expr_record_path + ["train.png"]
 graph_accuracy(expr_train_accs_list, "blacklist with modified graph training accuracy", filename)
 filename = expr_record_path + ["val.png"]
 graph_accuracy(expr_val_accs_list, "blacklist with modified graph validation accuracy", filename)
-draw_graph(init_layer_definitions, blacklists)
+# draw_graph(init_layer_definitions, blacklists)
