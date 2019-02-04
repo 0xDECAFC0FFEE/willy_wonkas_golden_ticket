@@ -31,6 +31,11 @@ def draw_graph(init_layer_definitions, blacklists):
             image_width, image_height = params["image_width"], params["image_height"]
             prev_layer_size = (image_width, image_height)
             variables = []
+        elif layer_type == LayerType.input_3d:
+            image_width, image_height = params["image_width"], params["image_height"]
+            image_depth = params["image_depth"]
+            prev_layer_size = (image_width, image_height, image_depth)
+            variables = []
         elif layer_type == LayerType.flatten:
             prev_layer_size = reduce(lambda a, b: a*b, prev_layer_size, 1)
             variables = []

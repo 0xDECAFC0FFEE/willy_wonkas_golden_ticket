@@ -16,11 +16,15 @@ def cifar10_dataset():
     train_X = train_X/255.0
     val_X = val_X/255.0
 
+    train_y_raw = train_y_raw.flatten()
+    val_y_raw = val_y_raw.flatten()
+
     # 1 hot encoding y values
     train_y = np.zeros((len(train_y_raw), 10))
     train_y[np.arange(len(train_y_raw)), train_y_raw] = 1
     val_y = np.zeros((len(val_y_raw), 10))
     val_y[np.arange(len(val_y_raw)), val_y_raw] = 1
+
 
     return (train_X, train_y), (val_X, val_y)
 

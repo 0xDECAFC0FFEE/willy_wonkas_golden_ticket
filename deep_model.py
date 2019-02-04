@@ -6,6 +6,7 @@ from functools import reduce
 class LayerType:
     input_1d = "input_1d"
     input_2d = "input_2d"
+    input_3d = "input_3d"
     flatten = "flatten"
     dropout = "dropout"
     relu = "relu"
@@ -24,6 +25,8 @@ def set_layer_definitions_init_values(layer_definitions):
             prev_layer_size = params["num_inputs"]
         elif layer_type == LayerType.input_2d:
             prev_layer_size = params["image_width"], params["image_height"]
+        elif layer_type == LayerType.input_3d:
+            prev_layer_size = params["image_width"], params["image_height"], params["image_depth"]
         elif layer_type == LayerType.flatten:
             prev_layer_size = reduce(lambda a, b: a*b, prev_layer_size, 1)
         elif layer_type == LayerType.dropout:
@@ -72,6 +75,13 @@ def build_deep_model(layer_definitions, blacklists):
             prev_layer_output = x
             prev_layer_size = (image_width, image_height)
             variables = []
+        elif layer_type == LayerType.input_3d:
+            image_width, image_height = params["image_width"], params["image_height"]
+            image_depth = params["image_depth"]
+            x = tf.placeholder(tf.float32, [None, image_width, image_height, image_depth])
+            prev_layer_output = x
+            prev_layer_size = (image_width, image_height, image_depth)
+            variables = []
         elif layer_type == LayerType.flatten:
             prev_layer_size = prev_layer_size
             prev_layer_output = tf.layers.flatten(prev_layer_output)
@@ -106,6 +116,9 @@ def build_blacklists(layer_definitions):
             blacklists.append([])
         elif layer_type == LayerType.input_2d:
             prev_layer_size = params["image_width"], params["image_height"]
+            blacklists.append([])
+        elif layer_type == LayerType.input_3d:
+            prev_layer_size = params["image_width"], params["image_height"], params["image_depth"]
             blacklists.append([])
         elif layer_type == LayerType.flatten:
             prev_layer_size = reduce(lambda a, b: a*b, prev_layer_size, 1)

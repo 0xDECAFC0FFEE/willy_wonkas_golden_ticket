@@ -11,6 +11,7 @@ from collections import namedtuple
 import random
 import string
 from pathlib import Path
+import heapq
 
 from deep_model import *
 from analysis import graph_accuracy, draw_graph
@@ -18,14 +19,20 @@ from io_funcs import cifar10_dataset, load_NN, save_NN, expr_record_path
 
 # configuration
 prune_percent = .2
-num_epochs = 2 # 60
+learning_rate = .01
+num_epochs = 50 # 60
 num_pruining_iterations = 1 # 20
 # NN definition
 init_layer_definitions = [
-    LayerDefinition(type=LayerType.input_2d, params={"image_width":32, "image_height":32}),
+    LayerDefinition(type=LayerType.input_3d, params={"image_width":32, "image_height":32, "image_depth": 3}),
     LayerDefinition(type=LayerType.flatten),
+    LayerDefinition(type=LayerType.relu, params={"layer_size": 1024}),
     LayerDefinition(type=LayerType.relu, params={"layer_size": 512}),
-    LayerDefinition(type=LayerType.dropout, params={"rate": .2}),
+    LayerDefinition(type=LayerType.relu, params={"layer_size": 512}),
+    LayerDefinition(type=LayerType.relu, params={"layer_size": 512}),
+    LayerDefinition(type=LayerType.relu, params={"layer_size": 512}),
+    LayerDefinition(type=LayerType.relu, params={"layer_size": 512}),
+    # LayerDefinition(type=LayerType.dropout, params={"rate": .2}),
     LayerDefinition(type=LayerType.softmax, params={"layer_size": 10})
 ]
 num_weights_initial = set_layer_definitions_init_values(init_layer_definitions)
@@ -62,7 +69,7 @@ def experiment(num_epochs, layer_definitions, blacklist):
     x, y, y_true, dnn_variables = build_deep_model(layer_definitions, blacklist)
 
     loss = tf.reduce_mean(tf.losses.softmax_cross_entropy(y_true, y))
-    train_step = tf.train.AdamOptimizer(learning_rate=.012).minimize(loss)
+    train_step = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
     init = tf.global_variables_initializer()
 
     # tpu_address = 'grpc://' + os.environ['COLAB_TPU_ADDR']
@@ -111,9 +118,11 @@ for run_num in tqdm(range(num_pruining_iterations), leave=False, position=1):
     # update blacklist with run results
     if run_num == num_pruining_iterations-1:
         break # don't update blacklist if its the last iteration for logging purposes
-    weight_indices.sort(key=lambda x: abs(x[0]))
+    weight_indices = [(abs(x[0]), x) for x in weight_indices]
+    heapq.heapify(weight_indices)
     num_weights_left_target = int(float(num_weights_left)*(1-prune_percent))
-    for weight_index in weight_indices:
+    while true:
+        key, weight_index = heapq.heappop(weight_indices)
         weight, layer, wb, index = weight_index
         if blacklists[layer][wb][index]:
             blacklists[layer][wb][index] = False
@@ -127,4 +136,4 @@ filename = expr_record_path + ["train.png"]
 graph_accuracy(expr_train_accs_list, "blacklist with modified graph training accuracy", filename)
 filename = expr_record_path + ["val.png"]
 graph_accuracy(expr_val_accs_list, "blacklist with modified graph validation accuracy", filename)
-draw_graph(init_layer_definitions, blacklists)
+# draw_graph(init_layer_definitions, blacklists)
