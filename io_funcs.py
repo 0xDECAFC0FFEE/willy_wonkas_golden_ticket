@@ -7,8 +7,8 @@ import pickle
 start_timestamp = str(datetime.now())
 expr_record_path = ["expr_records", "blacklist_modify_graph","exp_%s" % start_timestamp]
 
-def mnist_dataset():
-    raw_data = tf.keras.datasets.mnist.load_data(path='mnist.npz')
+def cifar10_dataset():
+    raw_data = tf.keras.datasets.cifar10.load_data()
     train_X, train_y_raw = raw_data[0]
     val_X, val_y_raw = raw_data[1]
 
