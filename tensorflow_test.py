@@ -1,8 +1,11 @@
 import numpy as np
 import tensorflow as tf
+tf.logging.set_verbosity(tf.logging.ERROR)
+
 import random
 from tqdm import tqdm
 import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 from sklearn.utils import shuffle
 from sklearn.metrics import confusion_matrix
 import copy
@@ -20,24 +23,31 @@ from io_funcs import mnist_dataset, load_NN, save_NN
 
 # configuration
 prune_percent = .2
-num_epochs = 60 # 60
-num_pruning_iterations = 40 # 20
+num_epochs = 150 # 60
+num_pruning_iterations = 10 # 20
 # NN definition
+# init_layer_definitions = [
+#     LayerDefinition(type=LayerType.input_2d, params={"image_width":28, "image_height":28}),
+#     LayerDefinition(type=LayerType.flatten),
+#     LayerDefinition(type=LayerType.relu, params={"layer_size": 512}),
+#     LayerDefinition(type=LayerType.dropout, params={"rate": .2}),
+#     LayerDefinition(type=LayerType.softmax, params={"layer_size": 10})
+# ]
 init_layer_definitions = [
     LayerDefinition(type=LayerType.input_2d, params={"image_width":28, "image_height":28}),
     LayerDefinition(type=LayerType.flatten),
-    LayerDefinition(type=LayerType.relu, params={"layer_size": 512}),
-    LayerDefinition(type=LayerType.dropout, params={"rate": .2}),
+    LayerDefinition(type=LayerType.relu, params={"layer_size": 300}),
+    LayerDefinition(type=LayerType.relu, params={"layer_size": 100}),
     LayerDefinition(type=LayerType.softmax, params={"layer_size": 10})
 ]
 num_weights_initial = set_layer_definitions_init_values(init_layer_definitions)
 num_weights_left = num_weights_initial
 blacklists = build_blacklists(init_layer_definitions)
 
-# load saved network
-saved_location = ["expr_records", "blacklist_modify_graph", 'exp_2019-02-03 04:38:12.695401_(60|30)_"more network weights = more stuff to prune? = higher final acc?"', "NN_definition"]
-defaults = {}
-blacklists, init_layer_definitions, num_weights_initial, num_weights_left = load_NN(saved_location, defaults)
+# # load saved network
+# saved_location = ["expr_records", "blacklist_modify_graph", 'exp_2019-02-03 04:38:12.695401_(60|30)_"more network weights = more stuff to prune? = higher final acc?"', "NN_definition"]
+# defaults = {}
+# blacklists, init_layer_definitions, num_weights_initial, num_weights_left = load_NN(saved_location, defaults)
 
 start_timestamp = str(datetime.now())
 expr_name = 'exp_%s-(%s|%s)-"%s"' % (start_timestamp, num_epochs, num_pruning_iterations, argv[1])
@@ -64,7 +74,7 @@ def experiment(num_epochs, layer_definitions, blacklist):
     x, y, y_true, dnn_variables = build_deep_model(layer_definitions, blacklist)
 
     loss = tf.reduce_mean(tf.losses.softmax_cross_entropy(y_true, y))
-    train_step = tf.train.AdamOptimizer(learning_rate=.012).minimize(loss)
+    train_step = tf.train.AdamOptimizer(learning_rate=.0012).minimize(loss)
     init = tf.global_variables_initializer()
 
     # tpu_address = 'grpc://' + os.environ['COLAB_TPU_ADDR']
