@@ -1,143 +1,9 @@
 from collections import namedtuple
-import numpy as np
 import tensorflow as tf
-from functools import reduce
+import copy
 
-class LayerType:
-    input_1d = "input_1d"
-    input_2d = "input_2d"
-    input_3d = "input_3d"
-    flatten = "flatten"
-    dropout = "dropout"
-    relu = "relu"
-    softmax = "softmax"
-
-LayerDefinition = namedtuple("LayerDefinition", ["type", "params", "init"])
-LayerDefinition.__new__.__defaults__ = (None, None, None)
-
-def set_layer_definitions_init_values(layer_definitions):
-    prev_layer_size = None
-    prev_layer_output = None
-    num_weights = 0
-    for i, layer_definition in enumerate(layer_definitions):
-        layer_type, params, init = layer_definition
-        if layer_type == LayerType.input_1d:
-            prev_layer_size = params["num_inputs"]
-        elif layer_type == LayerType.input_2d:
-            prev_layer_size = params["image_width"], params["image_height"]
-        elif layer_type == LayerType.input_3d:
-            prev_layer_size = params["image_width"], params["image_height"], params["image_depth"]
-        elif layer_type == LayerType.flatten:
-            prev_layer_size = reduce(lambda a, b: a*b, prev_layer_size, 1)
-        elif layer_type == LayerType.dropout:
-            pass
-        elif layer_type in [LayerType.relu, LayerType.softmax]:
-            layer_size = params["layer_size"]
-            W_shape = [prev_layer_size, layer_size]
-            b_shape = [layer_size]
-            W = tf.Session().run(tf.contrib.layers.xavier_initializer()(W_shape))
-            b = tf.Session().run(tf.contrib.layers.xavier_initializer()(b_shape))
-            layer_definitions[i] = layer_definitions[i]._replace(init=(W, b))
-
-            num_weights += prev_layer_size*layer_size
-            num_weights += layer_size
-
-            prev_layer_size = layer_size
-        else:
-            raise Exception("didnt find layer type", layer_type)
-    return num_weights
-
-def fc_layer(X, activation_function, init, blacklist):
-    blacklist_W, blacklist_b = blacklist
-    W, b = init
-    W = tf.where(tf.constant(blacklist_W), tf.Variable(initial_value=W), np.zeros(shape=blacklist_W.shape))
-    b = tf.where(tf.constant(blacklist_b), tf.Variable(initial_value=b), np.zeros(shape=blacklist_b.shape))
-    return activation_function(tf.matmul(X, W) + b), (W, b)
-
-def build_deep_model(layer_definitions, blacklists):
-    x = None # will be set in the init layer
-    assert(layer_definitions[-1].type == LayerType.softmax)
-    y_true = tf.placeholder(tf.float32, [None, layer_definitions[-1].params["layer_size"]])
-    prev_layer_size = None
-    prev_layer_output = None
-    dnn_variables = []
-    for layer_definition, blacklist in zip(layer_definitions, blacklists):
-        layer_type, params, init = layer_definition
-        if layer_type == LayerType.input_1d:
-            num_inputs = params["num_inputs"]
-            x = tf.placeholder(tf.float32, [None, num_inputs])
-            prev_layer_output = x
-            prev_layer_size = num_inputs
-            variables = []
-        elif layer_type == LayerType.input_2d:
-            image_width, image_height = params["image_width"], params["image_height"]
-            x = tf.placeholder(tf.float32, [None, image_width, image_height])
-            prev_layer_output = x
-            prev_layer_size = (image_width, image_height)
-            variables = []
-        elif layer_type == LayerType.input_3d:
-            image_width, image_height = params["image_width"], params["image_height"]
-            image_depth = params["image_depth"]
-            x = tf.placeholder(tf.float32, [None, image_width, image_height, image_depth])
-            prev_layer_output = x
-            prev_layer_size = (image_width, image_height, image_depth)
-            variables = []
-        elif layer_type == LayerType.flatten:
-            prev_layer_size = prev_layer_size
-            prev_layer_output = tf.layers.flatten(prev_layer_output)
-            prev_layer_size = reduce(lambda a, b: a*b, prev_layer_size, 1)
-            variables = []
-        elif layer_type == LayerType.dropout:
-            rate = params["rate"]
-            prev_layer_output = tf.layers.dropout(prev_layer_output, rate)
-            variables = []
-        elif layer_type == LayerType.relu:
-            layer_size = params["layer_size"]
-            prev_layer_output, variables = fc_layer(prev_layer_output, tf.nn.relu, init, blacklist)
-            prev_layer_size = layer_size
-        elif layer_type == LayerType.softmax:
-            layer_size = params["layer_size"]
-            prev_layer_output, variables = fc_layer(prev_layer_output, tf.nn.softmax, init, blacklist)
-            prev_layer_size = layer_size
-        else:
-            raise Exception("didnt find layer type", layer_type)
-        dnn_variables.append(variables)
-
-    return x, prev_layer_output, y_true, dnn_variables
-
-def build_blacklists(layer_definitions):
-    prev_layer_size = None
-    prev_layer_output = None
-    blacklists = []
-    for layer_definition in layer_definitions:
-        layer_type, params, init = layer_definition
-        if layer_type == LayerType.input_1d:
-            prev_layer_size = params["num_inputs"]
-            blacklists.append([])
-        elif layer_type == LayerType.input_2d:
-            prev_layer_size = params["image_width"], params["image_height"]
-            blacklists.append([])
-        elif layer_type == LayerType.input_3d:
-            prev_layer_size = params["image_width"], params["image_height"], params["image_depth"]
-            blacklists.append([])
-        elif layer_type == LayerType.flatten:
-            prev_layer_size = reduce(lambda a, b: a*b, prev_layer_size, 1)
-            blacklists.append([])
-        elif layer_type == LayerType.dropout:
-            blacklists.append([])
-        elif layer_type in [LayerType.relu, LayerType.softmax]:
-            layer_size = params["layer_size"]
-            W_blacklist = np.full(shape=(prev_layer_size, layer_size), fill_value=True)
-            b_blacklist = np.full(shape=(layer_size), fill_value=True)
-            blacklists.append((W_blacklist, b_blacklist))
-            prev_layer_size = layer_size
-        else:
-            raise Exception("didnt find layer type", layer_type)
-
-    return blacklists
-
-def get_layer_weights(sess, dnn_variables):
-    WeightIndex = namedtuple("WeightIndex", ["weight", "layer", "wb", "index"])
+def get_layer_weights(sess, dnn_variables): # TODO: remove
+    WeightIndex = namedtuple("WeightIndex", ["weight", "layer_index", "variable_index", "sub_variable_index"])
 
     def get_weights(i_l, i_wb, i_cur, weights):
         if len(weights.shape) > 1:
@@ -159,22 +25,162 @@ def get_layer_weights(sess, dnn_variables):
 
     return variables
 
-def count_nonzero_weights(sess, dnn_variables):
-    def get_weights(weights, cur_count):
-        if len(weights.shape) > 1:
-            for weight in weights:
-                get_weights(weight, cur_count)
-        elif len(weights.shape) == 1:
-            cur_count[0] += sum([weight != 0 for weight in weights])
+class TF_Wrapper:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def new(cls, layer_definitions, epochs=30, prune_iters=20, prune_style="global", global_prune_rate=.2):
+        """
+            creates a new model
+
+            layer_definitions: a Layer_Definition list (in layer_definition.py) describing the network architecture
+            prune_iters: number of times to repeatedly train and prune
+            prune_style: the type of pruning to do. could be "global" or "local".
+                local pruning = select some percent of each layer to prune separately.
+                global pruning = select some percent of all the weights to prune.
+            global_prune_rate: the rate at which to prune the network if prune_style="global". does nothing if prune_style = local
+        """
+        new_model = TF_Wrapper()
+        new_model.layer_definitions = layer_definitions
+        new_model.epochs = epochs # number of epochs to run each network for
+        new_model.prune_iters = prune_iters # number of times to prune model
+
+        new_model.variables_list = []
+        new_model.x, new_model.y, new_model.y_true = None, None, None
+
+        new_model.prune_style = prune_style
+        new_model.global_prune_rate = global_prune_rate
+        assert prune_style in ["global", "local"]
+
+        new_model.set_layer_shapes()
+        new_model.set_layer_weights_random()
+        new_model.build_blacklists()
+        new_model.build_tf_model()
+
+        return new_model
+
+    def copy(self):
+        """
+            copies a model over while reinitializing the internal tensorflow code
+            doesn't change the blacklist or the initial weights
+        """
+
+        new_model = copy.copy(self)
+        new_model.x, new_model.y, new_model.y_true = None, None, None
+        new_model.layer_definitions = None
+        new_model = copy.deepcopy(new_model)
+
+        new_model.layer_definitions = []
+        for layer_definition in self.layer_definitions:
+            new_model.layer_definitions.append(layer_definition.copy())
+
+        new_model.variables_list = []
+        new_model.build_tf_model()
+
+        return new_model
+
+    def set_layer_shapes(self):
+        prev_layer = self.layer_definitions[0]
+        for layer_definition in self.layer_definitions[1:]:
+            layer_definition.set_shape(prev_layer)
+            prev_layer = layer_definition
+
+    def set_layer_weights_random(self):
+        for layer_definition in self.layer_definitions:
+            layer_definition.set_weights_random()
+
+    def build_blacklists(self):
+        for layer_definition in self.layer_definitions:
+            layer_definition.build_blacklist()
+
+    def build_tf_model(self):
+        self.y_true = tf.placeholder(tf.float32, [None, self.layer_definitions[-1].output_shape])
+        self.x = self.layer_definitions[0].build_tf_model(None)
+
+        prev_layer_output = self.x
+        print(type(self.layer_definitions[0]))
+        print("expect", self.layer_definitions[0].input_shape, "=> ",self.layer_definitions[0].output_shape)
+        print("actual", self.layer_definitions[0].tf_variable.shape)
+
+        for layer_definition in self.layer_definitions[1:]:
+            print(type(layer_definition))
+            print("expect", layer_definition.input_shape, "=> ",layer_definition.output_shape)
+            prev_layer_output = layer_definition.build_tf_model(prev_layer_output)
+            print("actual", layer_definition.tf_variable.shape)
+
+        self.y = prev_layer_output
+
+    def get_layers_weight_variables(self): # TODO: remove
+        layers_weight_variables = []
+        for layer_definition in layer_definitions:
+            layers_weight_variables.append(layer_definition.get_layer_weight_variables())
+        return layers_weight_variables
+
+    def get_variable_weights_2(self, sess):
+        weights = []
+        for layer_index, layer in enumerate(self.layer_definitions):
+            weights.extend(layer.get_weight_index_tuples(sess, layer_index))
+
+        return weights
+
+        layer_weights = []
+        for layer_index, layer_weight_variables in enumerate(layers_weight_variables):
+            for variable_index, layer_weight_variable in enumerate(layer_weight_variables):
+                variable = sess.run(layer_weight_variable)
+                layer_weights.extend(weights_in_variable(variable, layer_index, variable_index))
+
+    def get_layer_weights(sess, self):
+        layer_weights = self.get_layer_weights_2(sess)
+        assert get_layer_weights(sess, self.get_layers_weight_variables()) == layer_weights
+        print("passed")
+        return layer_weights
+
+    def num_weights(self, include_blacklist):
+        # counts number of weights in the model
+        # set include_blacklist to false to only count number of weights that aren't blacklisted
+        num_weights = 0
+        for layer in self.layer_definitions:
+            num_weights += layer.num_weights(include_blacklist)
+        return num_weights
+
+    def clone_definition(self):
+        # copies the model INCLUDING the current initial values and blacklists but resetting the tf model
+        model_clone = copy.deepcopy(self)
+        model_clone.build_tf_model()
+        return model_clone
+
+    def prune(self, sess):
+        if self.prune_style == "global":
+            self.prune_global(sess, self.global_prune_rate)
+        elif self.prune_style == "local":
+            self.prune_by_layer(sess)
         else:
-            raise Exception("unexpected weights value %s" % weighs)
+            raise Exception('unrecognized prune style %s' % self.prune_style)
 
-    count = [0] # using a list as a pointer
-    for layer in dnn_variables:
-        for weight_variables in layer:
-            weight_values = sess.run(weight_variables)
-            get_weights(weight_values, count)
+    def prune_by_layer(self, sess):
+        "prunes network layer by layer based on the layer's prune rate"
 
-    return count[0]
+        for layer in self.layer_definitions:
+            layer.prune(weight_index_tuples=None, sess=sess)
 
-# def count_nonzero_weights(sess, dnn_variables):
+    def prune_global(self, sess, rate=.2):
+        "then all weights will be lumped into a list and smallest weights will by pruned at the global_rate"
+
+        weights_initial = self.num_weights(include_blacklist=False)
+        # print("initial weights num %s" % weights_initial)
+
+        weight_index_tuples = []
+        for layer_index, layer in enumerate(self.layer_definitions):
+            weight_index_tuples.extend(layer.get_weight_index_tuples(sess, layer_index=layer_index))
+            # print("layer %s has %s weights" % (layer_index, layer.num_weights()))
+
+        weight_index_tuples.sort(key=lambda x: abs(x[0]))
+        # print("total network weights: %s" % len(weight_index_tuples))
+
+        weight_index_tuples = weight_index_tuples[:int(weights_initial * rate)]
+        # print("total network weights to be pruned: %s" % len(weight_index_tuples))
+
+        for i, layer in enumerate(self.layer_definitions):
+            layer_weights_to_prune = [weight for weight in weight_index_tuples if weight.layer_index == i]
+            layer.prune(weight_index_tuples=layer_weights_to_prune, sess=sess)

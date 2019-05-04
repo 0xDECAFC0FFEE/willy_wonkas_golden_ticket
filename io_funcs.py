@@ -3,9 +3,38 @@ import numpy as np
 from datetime import datetime
 from pathlib import Path
 import pickle
+from sklearn.utils import shuffle
 
 start_timestamp = str(datetime.now())
 expr_record_path = ["expr_records", "blacklist_modify_graph","exp_%s" % start_timestamp]
+
+def batchify(Xs, ys, batches):
+    Xs, ys = shuffle(Xs, ys, random_state=0)
+    batch_size = int(len(Xs)/batches)
+    for i in range(batches):
+        yield Xs[batch_size*i: batch_size*(i+1)], ys[batch_size*i: batch_size*(i+1)]
+
+
+def mnist_dataset():
+    raw_data = tf.keras.datasets.mnist.load_data()
+    train_X, train_y_raw = raw_data[0]
+    val_X, val_y_raw = raw_data[1]
+
+    # normalizing x values in [0, 1]
+    train_X = train_X/255.0
+    val_X = val_X/255.0
+
+    train_y_raw = train_y_raw.flatten()
+    val_y_raw = val_y_raw.flatten()
+
+    # 1 hot encoding y values
+    train_y = np.zeros((len(train_y_raw), 10))
+    train_y[np.arange(len(train_y_raw)), train_y_raw] = 1
+    val_y = np.zeros((len(val_y_raw), 10))
+    val_y[np.arange(len(val_y_raw)), val_y_raw] = 1
+
+    return (train_X, train_y), (val_X, val_y)
+
 
 def cifar10_dataset():
     raw_data = tf.keras.datasets.cifar10.load_data()
@@ -24,7 +53,6 @@ def cifar10_dataset():
     train_y[np.arange(len(train_y_raw)), train_y_raw] = 1
     val_y = np.zeros((len(val_y_raw), 10))
     val_y[np.arange(len(val_y_raw)), val_y_raw] = 1
-
 
     return (train_X, train_y), (val_X, val_y)
 
@@ -51,8 +79,8 @@ def save_NN(path, blacklists, init_layer_definitions, num_weights, num_weights_l
     with open(Path(*path), "w+b") as file:
         saved_values = {
             "blacklists": blacklists,
-            "init_layer_definitions": init_layer_definitions, 
-            "num_weights": num_weights, 
+            "init_layer_definitions": init_layer_definitions,
+            "num_weights": num_weights,
             "num_weights_left": num_weights_left
         }
         pickle.dump(saved_values, file)
