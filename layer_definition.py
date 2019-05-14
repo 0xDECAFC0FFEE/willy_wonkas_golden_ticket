@@ -112,25 +112,15 @@ class Conv(LayerDefinition):
 
         prev_height, prev_width, prev_depth = self.input_shape
 
-        # width = prev_width - (self.kernel_width-1)
-        # height = prev_height - (self.kernel_width-1)
-
-        # self.input_shape = prev_layer.output_shape
-        # self.output_shape = [width, height, self.num_kernels]
-
-
-
-        width = prev_width
-        height = prev_height
+        width = prev_width - (self.kernel_width-1)
+        height = prev_height - (self.kernel_width-1)
 
         self.input_shape = prev_layer.output_shape
         self.output_shape = [width, height, self.num_kernels]
 
 
-
-
-        # self.W_shape = [self.num_kernels, self.kernel_width, self.kernel_width, prev_depth]
         self.W_shape = [self.kernel_width, self.kernel_width, prev_depth, self.num_kernels]
+        # self.W_shape = [self.num_kernels, self.kernel_width, self.kernel_width, prev_depth]
         self.b_shape = [self.num_kernels]
 
         assert prev_width >= self.kernel_width
@@ -141,46 +131,20 @@ class Conv(LayerDefinition):
         assert self.B_init == None
 
         with tf.Session() as sess:
-            W = sess.run(tf.contrib.layers.xavier_initializer()(self.W_shape))
-            b = sess.run(tf.contrib.layers.xavier_initializer()(self.b_shape))
+            W = sess.run(tf.contrib.layers.xavier_initializer()(self.W_shape, dtype=tf.float32))
+            b = sess.run(tf.contrib.layers.xavier_initializer()(self.b_shape, dtype=tf.float32))
 
         self.W_init = W
         self.b_init = b
 
     def build_tf_model(self, prev_layer):
-        # self.W = [[[[tf.Variable(initial_value=dimension) for dimension in column] for column in row] for row in kernel] for kernel in self.W_init]
-        # self.b = [tf.Variable(initial_value=kernel) for kernel in self.b_init]
-
-        # prev_height, prev_width, prev_depth = self.input_shape
-
-        # kernel_sum = []
-        # # pprint(list(zip(self.W, self.b)))
-        # for kernel_W, kernel_b in zip(self.W, self.b):
-        #     convolve_sum = tf.constant(np.zeros(prev_depth, dtype=np.float32))
-        #     for y_index, row_W in enumerate(kernel_W):
-        #         for x_index, column_W in enumerate(row_W):
-        #             y_stop = prev_height - (self.kernel_width-1) + y_index
-        #             x_stop = prev_width - (self.kernel_width-1) + x_index
-        #             out = prev_layer[:, y_index:y_stop, x_index:x_stop, :] * column_W
-        #             convolve_sum += tf.sum(out)
-        #     convolve_sum += kernel_b
-        #     kernel_sum.append(convolve_sum)
-
-        # self.tf_variable = tf.concat(kernel_sum, axis=0)
-
-
-
-
-        # self.tf_variable = tf.map_fn()
-        # print("conv output", self.tf_variable.shape)
-        # print("print expected conv output", self.output_shape)
-        # return self.tf_variable
-
-        self.W = tf.Variable(initial_value=self.W_init)
-        self.b = tf.Variable(initial_value=self.b_init)
-        self.tf_variable = tf.nn.conv2d(prev_layer, filter=self.W, strides=[1, 1, 1, 1], padding="VALID")
+        self.W = tf.Variable(initial_value=self.W_init, dtype=tf.float32)
+        self.b = tf.Variable(initial_value=self.b_init, dtype=tf.float32)
+        conv = tf.nn.conv2d(prev_layer, filter=self.W, strides=[1, 1, 1, 1], padding="VALID")
+        self.tf_variable = conv+self.b
 
         return self.tf_variable
+
 
 class Pool(LayerDefinition):
     def __init__(self):
@@ -224,21 +188,20 @@ class FCLayer(LayerDefinition):
         assert self.b_init == None
 
         with tf.Session() as sess:
-            W = sess.run(tf.contrib.layers.xavier_initializer()(self.W_shape))
-            b = sess.run(tf.contrib.layers.xavier_initializer()(self.b_shape))
+            W = sess.run(tf.contrib.layers.xavier_initializer()(self.W_shape, dtype=tf.float32))
+            # b = sess.run(tf.contrib.layers.xavier_initializer()(self.b_shape, dtype=tf.float32))
 
         self.W_init = W
-        self.b_init = b
+        self.b_init = np.zeros(shape=self.b_shape)
 
     def build_blacklist(self):
         self.W_blacklist = np.full(shape=self.W_shape, fill_value=True)
         self.b_blacklist = np.full(shape=self.b_shape, fill_value=True)
 
     def build_tf_model(self, prev_layer, activation_function):
-        self.W = tf.where(tf.constant(self.W_blacklist), tf.Variable(initial_value=self.W_init), np.zeros(shape=self.W_shape))
-        self.b = tf.where(tf.constant(self.b_blacklist), tf.Variable(initial_value=self.b_init), np.zeros(shape=self.b_shape))
+        self.W = tf.where(tf.constant(self.W_blacklist), tf.Variable(initial_value=self.W_init, dtype=tf.float32), np.zeros(shape=self.W_shape, dtype=np.float32))
+        self.b = tf.where(tf.constant(self.b_blacklist), tf.Variable(initial_value=self.b_init, dtype=tf.float32), np.zeros(shape=self.b_shape, dtype=np.float32))
         self.tf_variable = activation_function(tf.matmul(prev_layer, self.W) + self.b)
-        print("fc input shape", self.tf_variable.shape)
         return self.tf_variable
 
     def get_layer_weight_variables(self):
@@ -308,6 +271,20 @@ class ReLu(FCLayer):
 
     def build_tf_model(self, prev_layer):
         return FCLayer.build_tf_model(self, prev_layer, tf.nn.relu)
+
+class Linear(FCLayer):
+    def __init__(self, layer_size, W_init=None, b_init=None, prune_p=.2):
+        FCLayer.__init__(self, layer_size, W_init, b_init, prune_p)
+
+    def copy(self):
+        new_model = copy.copy(self)
+        new_model.tf_variable, new_model.W, new_model.b = None, None, None
+        new_model = copy.deepcopy(new_model)
+
+        return new_model
+
+    def build_tf_model(self, prev_layer):
+        return FCLayer.build_tf_model(self, prev_layer, lambda x: x)
 
 class Softmax(FCLayer):
     def __init__(self, layer_size, W_init=None, b_init=None, prune_p=.2):

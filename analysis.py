@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 from functools import reduce
-import graphviz
+# import graphviz
 
 def accuracy_1_hot(pred, true):
     pred_ys_max_index = np.argmax(pred, axis=1)

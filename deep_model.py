@@ -1,8 +1,11 @@
 from collections import namedtuple
 import tensorflow as tf
 import copy
+import pickle
+from tqdm import tqdm
+from pathlib import Path
 
-def get_layer_weights(sess, dnn_variables): # TODO: remove
+def get_layer_weights(sess, dnn_variables): # TODO: remove once am sure TF_wrapper.get_layer_weights works correctly
     WeightIndex = namedtuple("WeightIndex", ["weight", "layer_index", "variable_index", "sub_variable_index"])
 
     def get_weights(i_l, i_wb, i_cur, weights):
@@ -30,7 +33,7 @@ class TF_Wrapper:
         pass
 
     @classmethod
-    def new(cls, layer_definitions, epochs=30, prune_iters=20, prune_style="global", global_prune_rate=.2):
+    def new(cls, layer_definitions, epochs=30, prune_iters=20, prune_style="global", global_prune_rate=.2, learning_rate=.001, build_model=False):
         """
             creates a new model
 
@@ -46,26 +49,29 @@ class TF_Wrapper:
         new_model.epochs = epochs # number of epochs to run each network for
         new_model.prune_iters = prune_iters # number of times to prune model
 
-        new_model.variables_list = []
         new_model.x, new_model.y, new_model.y_true = None, None, None
 
         new_model.prune_style = prune_style
-        new_model.global_prune_rate = global_prune_rate
         assert prune_style in ["global", "local"]
+        new_model.global_prune_rate = global_prune_rate
+        new_model.learning_rate = learning_rate
 
         new_model.set_layer_shapes()
         new_model.set_layer_weights_random()
         new_model.build_blacklists()
-        new_model.build_tf_model()
+
+        if build_model:
+            new_model.build_tf_model()
 
         return new_model
 
-    def copy(self):
+    def reinit(self):
         """
             copies a model over while reinitializing the internal tensorflow code
             doesn't change the blacklist or the initial weights
         """
 
+        # weird double copy to avoid copying tensorflow code
         new_model = copy.copy(self)
         new_model.x, new_model.y, new_model.y_true = None, None, None
         new_model.layer_definitions = None
@@ -75,43 +81,42 @@ class TF_Wrapper:
         for layer_definition in self.layer_definitions:
             new_model.layer_definitions.append(layer_definition.copy())
 
-        new_model.variables_list = []
         new_model.build_tf_model()
 
         return new_model
 
     def set_layer_shapes(self):
+        # setting the shapes of each layer's weights
         prev_layer = self.layer_definitions[0]
         for layer_definition in self.layer_definitions[1:]:
             layer_definition.set_shape(prev_layer)
             prev_layer = layer_definition
 
     def set_layer_weights_random(self):
+        # generating each layer's weights
         for layer_definition in self.layer_definitions:
             layer_definition.set_weights_random()
 
     def build_blacklists(self):
+        # building blacklists for each layer
         for layer_definition in self.layer_definitions:
             layer_definition.build_blacklist()
 
     def build_tf_model(self):
-        self.y_true = tf.placeholder(tf.float32, [None, self.layer_definitions[-1].output_shape])
+        # building the internal tf model
+        tqdm.write("building tf model...")
+        self.y_true = tf.placeholder(tf.float16, [None, self.layer_definitions[-1].output_shape])
         self.x = self.layer_definitions[0].build_tf_model(None)
 
         prev_layer_output = self.x
-        print(type(self.layer_definitions[0]))
-        print("expect", self.layer_definitions[0].input_shape, "=> ",self.layer_definitions[0].output_shape)
-        print("actual", self.layer_definitions[0].tf_variable.shape)
 
         for layer_definition in self.layer_definitions[1:]:
-            print(type(layer_definition))
-            print("expect", layer_definition.input_shape, "=> ",layer_definition.output_shape)
             prev_layer_output = layer_definition.build_tf_model(prev_layer_output)
-            print("actual", layer_definition.tf_variable.shape)
 
         self.y = prev_layer_output
+        tqdm.write("tf model built")
 
-    def get_layers_weight_variables(self): # TODO: remove
+    def get_layers_weight_variables(self): # TODO: remove once am sure get_layer_weights works correctly
         layers_weight_variables = []
         for layer_definition in layer_definitions:
             layers_weight_variables.append(layer_definition.get_layer_weight_variables())
@@ -131,9 +136,10 @@ class TF_Wrapper:
                 layer_weights.extend(weights_in_variable(variable, layer_index, variable_index))
 
     def get_layer_weights(sess, self):
+        # 
         layer_weights = self.get_layer_weights_2(sess)
         assert get_layer_weights(sess, self.get_layers_weight_variables()) == layer_weights
-        print("passed")
+        tqdm.write("passed")
         return layer_weights
 
     def num_weights(self, include_blacklist):
@@ -144,11 +150,31 @@ class TF_Wrapper:
             num_weights += layer.num_weights(include_blacklist)
         return num_weights
 
-    def clone_definition(self):
-        # copies the model INCLUDING the current initial values and blacklists but resetting the tf model
-        model_clone = copy.deepcopy(self)
-        model_clone.build_tf_model()
-        return model_clone
+    def prune_by_layer(self, sess):
+        "prunes network layer by layer based on that layer's prune rate"
+
+        for layer in self.layer_definitions:
+            layer.prune(weight_index_tuples=None, sess=sess)
+
+    def prune_global(self, sess, rate=.2):
+        """
+            prunes all weights in the same batch as opposed to pruning by layer.
+            the smallest weights will by pruned at the global_rate.
+        """
+
+        weights_initial = self.num_weights(include_blacklist=False)
+
+        weight_index_tuples = []
+        for layer_index, layer in enumerate(self.layer_definitions):
+            weight_index_tuples.extend(layer.get_weight_index_tuples(sess, layer_index=layer_index))
+
+        weight_index_tuples.sort(key=lambda x: abs(x[0]))
+
+        weight_index_tuples = weight_index_tuples[:int(weights_initial * rate)]
+
+        for i, layer in enumerate(self.layer_definitions):
+            layer_weights_to_prune = [weight for weight in weight_index_tuples if weight.layer_index == i]
+            layer.prune(weight_index_tuples=layer_weights_to_prune, sess=sess)
 
     def prune(self, sess):
         if self.prune_style == "global":
@@ -158,29 +184,15 @@ class TF_Wrapper:
         else:
             raise Exception('unrecognized prune style %s' % self.prune_style)
 
-    def prune_by_layer(self, sess):
-        "prunes network layer by layer based on the layer's prune rate"
+    def save(self, filepath):
+        Path(*filepath).parent.mkdir(parents=True, exist_ok=True)
 
-        for layer in self.layer_definitions:
-            layer.prune(weight_index_tuples=None, sess=sess)
+        new_model = copy.copy(self)
+        new_model.x, new_model.y, new_model.y_true = None, None, None
+        new_model.layer_definitions = None
+        new_model = copy.deepcopy(new_model)
 
-    def prune_global(self, sess, rate=.2):
-        "then all weights will be lumped into a list and smallest weights will by pruned at the global_rate"
-
-        weights_initial = self.num_weights(include_blacklist=False)
-        # print("initial weights num %s" % weights_initial)
-
-        weight_index_tuples = []
-        for layer_index, layer in enumerate(self.layer_definitions):
-            weight_index_tuples.extend(layer.get_weight_index_tuples(sess, layer_index=layer_index))
-            # print("layer %s has %s weights" % (layer_index, layer.num_weights()))
-
-        weight_index_tuples.sort(key=lambda x: abs(x[0]))
-        # print("total network weights: %s" % len(weight_index_tuples))
-
-        weight_index_tuples = weight_index_tuples[:int(weights_initial * rate)]
-        # print("total network weights to be pruned: %s" % len(weight_index_tuples))
-
-        for i, layer in enumerate(self.layer_definitions):
-            layer_weights_to_prune = [weight for weight in weight_index_tuples if weight.layer_index == i]
-            layer.prune(weight_index_tuples=layer_weights_to_prune, sess=sess)
+        with open(Path(*filepath), "wb+") as file_handle:
+            pickle.dump(new_model, file_handle)
+        
+        tqdm.write("saved nn definition at %s" % Path(*filepath))
